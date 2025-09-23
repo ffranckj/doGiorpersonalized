@@ -1,6 +1,6 @@
 package it.dogior.hadEnough
 
-import com.lagradost.api.Log
+import com.lagradost.api.Log // MODIFICA: Ripristinato l'import corretto per Log
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
@@ -16,7 +16,7 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addRating
+// import com.lagradost.cloudstream3.LoadResponse.Companion.addRating // Rimosso import non più necessario
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.loadExtractor
 import it.dogior.hadEnough.extractors.DroploadExtractor
@@ -82,10 +82,10 @@ class AltaDefinizione : MainAPI() {
         } else {
             img?.attr("data-src")
         }
-        val rating = this.selectFirst("div.imdb-rate")?.ownText()
+        // val rating = this.selectFirst("div.imdb-rate")?.ownText() // Voto rimosso
         return newMovieSearchResponse(title, href) {
             this.posterUrl = fixUrlNull(poster)
-            this.score = Score.from(rating, 10)
+            // this.score = Score.from(rating, 10) // Punteggio rimosso
         }
     }
 
@@ -93,8 +93,19 @@ class AltaDefinizione : MainAPI() {
         val doc = app.get("$mainUrl/?story=$query&do=search&subaction=search").document
         val container = doc.select("#dle-content > .col-lg-3")
 
-        return container.select("div.box").mapNotNull {
+        val results = container.select("div.box").mapNotNull {
             it.toSearchResponse()
+        }
+
+        // Filtro per la ricerca "esatta"
+        val queryWords = query.split(" ").filter { it.isNotBlank() }
+        if (queryWords.isEmpty()) {
+            return results
+        }
+        return results.filter { searchResponse ->
+            queryWords.all { word ->
+                searchResponse.name.contains(word, ignoreCase = true)
+            }
         }
     }
 
@@ -104,20 +115,23 @@ class AltaDefinizione : MainAPI() {
         val title = content.select("h2").text().ifEmpty { "Sconosciuto" }
         val poster = fixUrlNull(content.select("img.wp-post-image").attr("src"))
         val plot = content.selectFirst("#sfull")?.ownText()?.substringAfter("Trama: ")
-        val rating = content.selectFirst("span.rateIMDB")?.text()?.substringAfter("IMDb: ")
+        // val rating = content.selectFirst("span.rateIMDB")?.text()?.substringAfter("IMDb: ") // Voto rimosso
 
         val details = content.select("#details > li")
         val genreElements = details.toList().first { it.text().contains("Genere: ") }
         val genres = genreElements.select("a").map { it.text() }
         val yearElements = details.toList().first { it.text().contains("Anno: ") }
         val year = yearElements.select("div").last()?.text()
+
+        // I suggerimenti non erano presenti, quindi non c'è nulla da rimuovere.
+
         return if (url.contains("/serie-tv/")) {
             val episodes = getEpisodes(doc, poster)
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.plot = plot
                 this.tags = genres
-                addRating(rating)
+                // addRating(rating) // Voto rimosso
             }
         } else {
             val mostraGuardaLink = doc.select("#player1 > iframe").attr("src")
@@ -137,7 +151,7 @@ class AltaDefinizione : MainAPI() {
                 this.plot = plot
                 this.tags = genres
                 this.year = year?.toIntOrNull()
-                addRating(rating)
+                // addRating(rating) // Voto rimosso
             }
         }
     }
