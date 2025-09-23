@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <option name="testRunner" value="CHOOSE_PER_TEST" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="gradleJvm" value="#GRADLE_LOCAL_JAVA_HOME" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/AltaDefinizione" />
+            <option value="$PROJECT_DIR$/AnimeUnity" />
+            <option value="$PROJECT_DIR$/AnimeWorld" />
+            <option value="$PROJECT_DIR$/Arte" />
+            <option value="$PROJECT_DIR$/CB01" />
+            <option value="$PROJECT_DIR$/CalcioStreaming" />
+            <option value="$PROJECT_DIR$/CorsaroNero" />
+            <option value="$PROJECT_DIR$/DaddyLive" />
+            <option value="$PROJECT_DIR$/Huhu" />
+            <option value="$PROJECT_DIR$/IPTV" />
+            <option value="$PROJECT_DIR$/SimklProvider" />
+            <option value="$PROJECT_DIR$/StreamingCommunity" />
+            <option value="$PROJECT_DIR$/TV" />
+            <option value="$PROJECT_DIR$/Torrentio" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>
