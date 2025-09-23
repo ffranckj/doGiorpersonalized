@@ -1,0 +1,24 @@
+[
+    {
+        "iconUrl": "https://www.animeunity.so/apple-touch-icon.png",
+        "fileHash": "sha256-0ba393b48e666514012cb916043269831b554de9c51d17a9fdc50cb52412e169",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ffranckj/doGiorpersonalized",
+        "fileSize": 103974,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "doGior"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "version": 15,
+        "internalName": "AnimeUnity",
+        "description": "Anime from AnimeUnity",
+        "url": "https://raw.githubusercontent.com/ffranckj/doGiorpersonalized/builds/AnimeUnity.cs3",
+        "name": "AnimeUnity"
+    }
+]
