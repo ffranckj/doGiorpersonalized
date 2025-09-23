@@ -1,0 +1,46 @@
+[
+    {
+        "iconUrl": "https://www.animeunity.so/apple-touch-icon.png",
+        "fileHash": "sha256-379c8fc83e029bb47e7db203df2c161e991f36a1d34e040747a1f22c69f5fc7c",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ffranckj/doGiorpersonalized",
+        "fileSize": 92548,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "doGior"
+        ],
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "version": 15,
+        "internalName": "AnimeUnity",
+        "description": "Anime from AnimeUnity",
+        "url": "https://raw.githubusercontent.com/ffranckj/doGiorpersonalized/builds/AnimeUnity.cs3",
+        "name": "AnimeUnity"
+    },
+    {
+        "iconUrl": "https://direttecommunity.gratis/templates/calciostreaming1/images/icons/apple-touch-icon.png",
+        "fileHash": "sha256-4cda549a89c1b2b7cfdf6440773637fe8749ce2143fa5f4507963302dd648561",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/ffranckj/doGiorpersonalized",
+        "fileSize": 12407,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Gian-Fr",
+            "Adippe",
+            "doGior"
+        ],
+        "tvTypes": [
+            "Live"
+        ],
+        "version": 5,
+        "internalName": "CalcioStreaming",
+        "description": "Live streams from the CalcioStreaming. Forked from the CalcioStreaming plugin in the ItalianProvider repo",
+        "url": "https://raw.githubusercontent.com/ffranckj/doGiorpersonalized/builds/CalcioStreaming.cs3",
+        "name": "CalcioStreaming"
+    }
+]
