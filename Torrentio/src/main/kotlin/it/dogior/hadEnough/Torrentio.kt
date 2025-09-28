@@ -1,8 +1,6 @@
-package it.dogior.hadEnough // Assicurati che il package sia corretto
+package it.dogior.hadEnough
 
 import com.lagradost.api.Log
-// import com.lagradost.cloudstream3.Actor // RIMOSSO: Non più necessario se non usiamo gli attori
-// import com.lagradost.cloudstream3.ActorData // RIMOSSO: Non più necessario
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.HomePageResponse
@@ -18,7 +16,6 @@ import com.lagradost.cloudstream3.metaproviders.TmdbProvider
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
-// import com.lagradost.cloudstream3.toRatingInt // RIMOSSO: Non più necessario se non usiamo il rating
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.INFER_TYPE
@@ -31,7 +28,11 @@ import com.lagradost.cloudstream3.utils.Qualities
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import java.util.Properties
+import java.io.FileInputStream
 
+// Assicurati che questa importazione sia corretta se usi DTO da un altro file
+// import it.dogior.hadEnough.dto.* // Esempio se hai un package dto
 
 class Torrentio : TmdbProvider() {
     private val torrentioUrl = "https://torrentio.strem.fun"
@@ -44,13 +45,41 @@ class Torrentio : TmdbProvider() {
     private val tmdbAPI = "https://api.themoviedb.org/3"
     private val TRACKER_LIST_URL = "https://newtrackon.com/api/stable"
 
-    // ASSICURATI CHE BuildConfig.TMDB_API SIA DEFINITO NEL TUO PROGETTO
-    // Se non lo è, dovrai inserire qui la tua chiave API TMDB manualmente o trovare un altro modo per fornirla.
-    // Esempio: private val apiKey = "LA_TUA_CHIAVE_API_TMDB"
-    // private val apiKey = BuildConfig.TMDB_API // Commenta o rimuovi questa riga
-    private val apiKey = "eee169159e4ccf56bca7ba3ea5ee6913" // Sostituisci con la tua vera chiave
-    private val authHeaders =
+    private val apiKey: String by lazy {
+        val props = Properties()
+        var keyFromProperties: String? = null
+        val potentialPaths = listOf(
+            "../secrets.properties",
+            "secrets.properties",
+            "../../secrets.properties"
+        )
+
+        for (path in potentialPaths) {
+            try {
+                FileInputStream(path).use { stream ->
+                    props.load(stream)
+                    keyFromProperties = props.getProperty("TMDB_API")
+                    if (!keyFromProperties.isNullOrBlank()) {
+                        Log.d("Torrentio", "TMDB API Key loaded successfully from '$path'")
+                        return@lazy keyFromProperties!!
+                    }
+                }
+            } catch (e: java.io.FileNotFoundException) {
+                Log.w("Torrentio", "secrets.properties not found at '$path'")
+            } catch (e: Exception) {
+                // CORREZIONE per Log.e
+                Log.e("Torrentio", "Error reading TMDB API Key from '$path': ${e.message}")
+                break
+            }
+        }
+
+        Log.e("Torrentio", "TMDB_API key not found in any attempted secrets.properties paths or file is not readable.")
+        return@lazy "MISSING_TMDB_API_KEY" // Questa riga (96 nel tuo errore) dovrebbe essere corretta.
+    }
+
+    private val authHeaders by lazy {
         mapOf("Authorization" to "Bearer $apiKey")
+    }
 
     private val today = getDate()
     private val tvFilters =
@@ -79,66 +108,105 @@ class Torrentio : TmdbProvider() {
     private fun getDate(): String {
         val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val calendar = Calendar.getInstance()
-        val today = formatter.format(calendar.time)
-        return today
+        return formatter.format(calendar.time)
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val resp = app.get("${request.data}&page=$page", headers = authHeaders).body.string()
-        val parsedResponse = parseJson<Results>(resp).results?.mapNotNull { media ->
+        val urlRequest = "${request.data}&page=$page"
+        Log.d("Torrentio", "Requesting TMDB URL: $urlRequest with key ending in ${apiKey.takeLast(4)}")
+        val respBody = try {
+            app.get(urlRequest, headers = authHeaders).body.string()
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Error fetching getMainPage from TMDB: ${e.message}")
+            throw ErrorLoadingException("Failed to load data for ${request.name}")
+        }
+        Log.d("Torrentio", "TMDB Response for ${request.name} (first 300 chars): ${respBody.take(300)}")
+
+        val parsedJson = try {
+            parseJson<Results>(respBody)
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Failed to parse JSON for ${request.name}: ${e.message}")
+            Log.d("Torrentio", "Problematic JSON Body: $respBody")
+            throw ErrorLoadingException("Invalid JSON response for ${request.name}")
+        }
+
+        val home = parsedJson.results?.mapNotNull { media ->
             val type = if (request.data.contains("tv")) "tv" else "movie"
             media.toSearchResponse(type = type)
         }?.toMutableList()
 
-        val home = parsedResponse ?: throw ErrorLoadingException("Invalid Json reponse")
+        if (home == null) {
+            Log.w("Torrentio", "Parsed results are null for ${request.name}")
+            throw ErrorLoadingException("No results for ${request.name}")
+        }
+        if (home.isEmpty()){
+            Log.w("Torrentio", "Parsed results are empty for ${request.name}")
+        }
         return newHomePageResponse(request.name, home)
     }
 
-
     override suspend fun search(query: String): List<SearchResponse>? {
-        return app.get(
-            "$tmdbAPI/search/multi?language=it-IT&query=$query&page=1&include_adult=true",
-            headers = authHeaders
-        ).parsedSafe<Results>()?.results?.mapNotNull { media ->
-            media.toSearchResponse()
+        val searchUrl = "$tmdbAPI/search/multi?language=it-IT&query=$query&page=1&include_adult=true"
+        Log.d("Torrentio", "Search TMDB URL: $searchUrl with key ending in ${apiKey.takeLast(4)}")
+
+        val response = try {
+            app.get(searchUrl, headers = authHeaders)
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Error fetching search from TMDB: ${e.message}")
+            return null
+        }
+        val responseBodyString = try {
+            response.body.string() // Leggi il corpo solo una volta
+        } catch (e: Exception) {
+            Log.e("Torrentio", "Error reading search response body: ${e.message}")
+            return null
+        }
+        Log.d("Torrentio", "Search TMDB Response (status ${response.code}, first 300 chars): ${responseBodyString.take(300)}")
+
+        return try {
+            parseJson<Results>(responseBodyString).results?.mapNotNull { media ->
+                media.toSearchResponse()
+            }
+        } catch (e: Exception) {
+            Log.e("Torrentio", "Failed to parse search response JSON: ${e.message}")
+            null
         }
     }
 
     override suspend fun load(url: String): LoadResponse? {
         val data = parseJson<Data>(url)
         val type = if (data.type == "movie") TvType.Movie else TvType.TvSeries
-        // MODIFICA: Rimosso "credits" e "recommendations" da append_to_response
-        // Se TMDb non li richiede obbligatoriamente, questo eviterà di scaricare dati inutili.
-        // Se TMDb li richiede ancora, le proprietà in MediaDetail saranno semplicemente null o vuote.
-        val append = "alternative_titles,external_ids,keywords,videos" // MODIFICA
+        val append = "alternative_titles,external_ids,keywords,videos"
 
         val resUrl = if (type == TvType.Movie) {
             "$tmdbAPI/movie/${data.id}?language=it-IT&append_to_response=$append"
         } else {
             "$tmdbAPI/tv/${data.id}?language=it-IT&append_to_response=$append"
         }
-        val res = app.get(resUrl, headers = authHeaders).parsedSafe<MediaDetail>()
-            ?: throw ErrorLoadingException("Invalid Json Response")
+        Log.d("Torrentio", "Load TMDB URL: $resUrl with key ending in ${apiKey.takeLast(4)}")
+
+        val res = try {
+            app.get(resUrl, headers = authHeaders).parsedSafe<MediaDetail>()
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Error fetching load details from TMDB for ID ${data.id}: ${e.message}")
+            throw ErrorLoadingException("Failed to load details for ID ${data.id}")
+        }
+
+        if (res == null) {
+            Log.e("Torrentio", "Invalid Json Response or null from TMDB for ID ${data.id}. URL: $resUrl")
+            throw ErrorLoadingException("Invalid Json Response from TMDB for ID ${data.id}")
+        }
 
         val title = res.title ?: res.name ?: return null
         val poster = getImageUrl(res.posterPath, getOriginal = true)
         val bgPoster = getImageUrl(res.backdropPath, getOriginal = true)
         val releaseDate = res.releaseDate ?: res.firstAirDate
         val year = releaseDate?.split("-")?.first()?.toIntOrNull()
-        // val rating = res.voteAverage.toString().toRatingInt() // RIMOSSO
         val genres = res.genres?.mapNotNull { it.name }
-
-        // val actors = res.credits?.cast?.mapNotNull { cast -> // RIMOSSO
-        //     val name = cast.name ?: cast.originalName ?: return@mapNotNull null
-        //     ActorData(
-        //         Actor(name, getImageUrl(cast.profilePath)),
-        //         roleString = cast.character
-        //     )
-        // } ?: emptyList() // RIMOSSO
-
-        // val recommendations = // RIMOSSO
-        //     res.recommendations?.results?.mapNotNull { media -> media.toSearchResponse() } // RIMOSSO
-
         val trailer = res.videos?.results?.filter { it.type == "Trailer" }
             ?.map { "https://www.youtube.com/watch?v=${it.key}" }?.reversed().orEmpty()
             .ifEmpty { res.videos?.results?.map { "https://www.youtube.com/watch?v=${it.key}" } }
@@ -154,8 +222,7 @@ class Torrentio : TmdbProvider() {
                     title = title,
                     year = year,
                     imdbId = res.imdbId,
-                    airedDate = res.releaseDate
-                        ?: res.firstAirDate,
+                    airedDate = res.releaseDate ?: res.firstAirDate,
                 ).toJson(),
             ) {
                 this.posterUrl = poster
@@ -164,9 +231,6 @@ class Torrentio : TmdbProvider() {
                 this.plot = res.overview
                 this.duration = res.runtime
                 this.tags = genres
-                // this.rating = rating // RIMOSSO
-                // this.recommendations = recommendations // RIMOSSO
-                // this.actors = actors // RIMOSSO
                 addTrailer(trailer)
                 addTMDbId(data.id.toString())
             }
@@ -183,9 +247,6 @@ class Torrentio : TmdbProvider() {
                 this.year = year
                 this.plot = res.overview
                 this.tags = genres
-                // this.rating = rating // RIMOSSO
-                // this.recommendations = recommendations // RIMOSSO
-                // this.actors = actors // RIMOSSO
                 addTrailer(trailer)
                 addTMDbId(data.id.toString())
             }
@@ -194,10 +255,18 @@ class Torrentio : TmdbProvider() {
 
     private suspend fun getEpisodes(showData: MediaDetail, id: Int?): List<Episode> {
         val episodes = showData.seasons?.mapNotNull { season ->
-            app.get(
-                "$tmdbAPI/tv/${showData.id}/season/${season.seasonNumber}",
-                headers = authHeaders
-            ).parsedSafe<MediaDetailEpisodes>()?.episodes?.map { ep ->
+            val seasonUrl = "$tmdbAPI/tv/${showData.id}/season/${season.seasonNumber}"
+            Log.d("Torrentio", "Season TMDB URL: $seasonUrl with key ending in ${apiKey.takeLast(4)}")
+
+            val seasonDetail = try {
+                app.get(seasonUrl, headers = authHeaders).parsedSafe<MediaDetailEpisodes>()
+            } catch (e: Exception) {
+                // CORREZIONE per Log.e
+                Log.e("Torrentio", "Error fetching season details from TMDB: ${e.message}")
+                null
+            }
+
+            seasonDetail?.episodes?.map { ep ->
                 newEpisode(
                     LinkData(
                         id,
@@ -205,10 +274,10 @@ class Torrentio : TmdbProvider() {
                         season = ep.seasonNumber,
                         episode = ep.episodeNumber,
                         epid = ep.id,
-                        title = showData.title, // MODIFICA: Usato showData.title invece di res.title perché res non è in scope qui
+                        title = showData.name ?: showData.title,
                         year = season.airDate?.split("-")?.first()?.toIntOrNull(),
                         epsTitle = ep.name,
-                        date = season.airDate,
+                        date = ep.airDate,
                         imdbId = showData.imdbId ?: showData.externalIds?.imdbId
                     ).toJson()
                 ) {
@@ -217,7 +286,6 @@ class Torrentio : TmdbProvider() {
                     this.episode = ep.episodeNumber
                     this.posterUrl = getImageUrl(ep.stillPath)
                     this.description = ep.overview
-                    // this.rating = ep.voteAverage.toString().toRatingInt() // RIMOSSO: Rating per episodio, se vuoi rimuoverlo anche qui
                 }
             }
         }?.flatten()
@@ -232,18 +300,41 @@ class Torrentio : TmdbProvider() {
     ): Boolean {
         val show = parseJson<LinkData>(data)
         var success = false
-        val url = if (show.season == null) {
+        val torrentioRequestUrl = if (show.season == null) {
             "$mainUrl/stream/movie/${show.imdbId}.json"
         } else {
             "$mainUrl/stream/series/${show.imdbId}:${show.season}:${show.episode}.json"
         }
+        Log.d("Torrentio", "Torrentio Request URL: $torrentioRequestUrl")
+
         val headers = mapOf(
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "User-Agent" to "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         )
-        val res = app.get(url, headers = headers, timeout = 100L)
-        val body = res.body.string()
-        val response = parseJson<TorrentioResponse>(body)
+
+        val resBody = try {
+            app.get(torrentioRequestUrl, headers = headers, timeout = 20000L).body.string()
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Error fetching from Torrentio: ${e.message}")
+            return false
+        }
+
+        Log.d("Torrentio", "Torrentio Raw Response (first 300 chars): ${resBody.take(300)}")
+
+        if (resBody.isBlank() || resBody.startsWith("<", ignoreCase = true)) {
+            Log.e("Torrentio", "Torrentio returned HTML or empty response.")
+            return false
+        }
+
+        val response = try {
+            parseJson<TorrentioResponse>(resBody)
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Failed to parse Torrentio JSON response: ${e.message}")
+            Log.e("Torrentio", "Problematic Torrentio JSON Body (first 500 chars): ${resBody.take(500)}")
+            return false
+        }
 
         response.streams.forEach { stream ->
             val formattedTitleName = stream.title
@@ -258,63 +349,77 @@ class Torrentio : TmdbProvider() {
                     "Torrentio | $tags | Seeder: $seeder | Provider: $provider".trim()
                 }
             val magnet = generateMagnetLink(TRACKER_LIST_URL, stream.infoHash)
-            if (magnet.isNotEmpty()) success = true
-            callback.invoke(
-                newExtractorLink(
-                    "Torrentio",
-                    formattedTitleName ?: stream.name ?: "",
-                    url = magnet,
-                    INFER_TYPE
-                ) {
-                    this.referer = ""
-                    this.quality = getIndexQuality(stream.name)
-                }
-            )
+            if (magnet.isNotEmpty()) {
+                success = true
+                // CORREZIONE per newExtractorLink
+                callback.invoke(
+                    newExtractorLink(
+                        source = this.name,
+                        name = formattedTitleName ?: stream.name ?: "Torrent Link",
+                        url = magnet,
+                        type = INFER_TYPE
+                        // referer e quality verranno impostati nel blocco successivo se necessario
+                    ).apply {
+                        quality = getIndexQuality(stream.name)
+                        // referer = "" // Imposta se necessario
+                    }
+                )
+            }
         }
         return success
     }
 
-    private suspend fun generateMagnetLink(url: String, hash: String?): String {
-        // Aggiunto controllo per hash nullo o vuoto
+    private suspend fun generateMagnetLink(trackerListUrl: String, hash: String?): String {
         if (hash.isNullOrBlank()) return ""
-        val response = app.get(url)
 
-        val trackerList = response.text.trim().split("\n")
+        val trackerResponseText = try {
+            app.get(trackerListUrl).text
+        } catch (e: Exception) {
+            // CORREZIONE per Log.e
+            Log.e("Torrentio", "Failed to get tracker list from $trackerListUrl: ${e.message}")
+            null
+        }
+
+        val trackerList = trackerResponseText?.trim()?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()
 
         return buildString {
             append("magnet:?xt=urn:btih:$hash")
             trackerList.forEach { tracker ->
-                if (tracker.isNotBlank()) {
-                    append("&tr=").append(tracker.trim())
-                }
+                append("&tr=").append(tracker.trim())
             }
         }
     }
 
     private fun getIndexQuality(str: String?): Int {
-        return Regex("(\\d{3,4})[pP]").find(str ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (str == null) return Qualities.Unknown.value
+        return Regex("(\\d{3,4})[pP]").find(str)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: Qualities.Unknown.value
     }
 
     private fun getImageUrl(link: String?, getOriginal: Boolean = false): String? {
         if (link == null) return null
         val width = if (getOriginal) "original" else "w500"
-        return if (link.startsWith("/")) "https://image.tmdb.org/t/p/$width$link" else link // MODIFICA: corretto $link invece di /$link
+        return if (link.startsWith("/")) "https://image.tmdb.org/t/p/$width$link" else link
     }
 
-    private fun Media.toSearchResponse(type: String = "tv"): SearchResponse? {
-        if (mediaType == "person") return null
-        // MODIFICA: Assicurato che type sia corretto per TvType in base a mediaType o al fallback 'type'
-        val currentTvType = when (mediaType ?: type) {
+    // Assicurati che la classe Media (nel tuo DTO) abbia le proprietà:
+    // mediaType: String?, title: String?, name: String?, originalTitle: String?, id: Int, posterPath: String?
+    private fun Media.toSearchResponse(type: String? = null): SearchResponse? {
+        if (this.mediaType == "person") return null
+
+        val itemType = when (this.mediaType ?: type) {
             "movie" -> TvType.Movie
             "tv" -> TvType.TvSeries
-            else -> TvType.Movie // Fallback generico, o potresti volerlo più specifico
-        }
+            else -> null
+        } ?: return null
+
         return newMovieSearchResponse(
-            title ?: name ?: originalTitle ?: return null,
-            Data(id = id, type = mediaType ?: type).toJson(),
-            currentTvType, // MODIFICA
+            this.title ?: this.name ?: this.originalTitle ?: return null,
+            Data(id = this.id, type = this.mediaType ?: type).toJson(),
+            itemType,
         ) {
+            // Se ancora dà errore qui, VERIFICA LA TUA CLASSE Media nel DTO.
+            // Deve avere una proprietà 'posterPath' (o come si chiama il campo JSON corrispondente)
             this.posterUrl = getImageUrl(posterPath)
         }
     }
