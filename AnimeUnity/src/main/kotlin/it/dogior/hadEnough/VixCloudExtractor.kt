@@ -9,17 +9,23 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONObject
 
-class VixCloudExtractor : ExtractorApi() {
+class VixCloudExtractor(
+    private val sourceName: String = "VixCloud",
+    private val displayName: String = "AnimeUnity",
+) : ExtractorApi() {
     override val mainUrl = "vixcloud.co"
     override val name = "VixCloud"
     override val requiresReferer = false
-    private val TAG = "VixCloudExtractor"
-    private val h = mutableMapOf(
+    private val headers = mutableMapOf(
         "Accept" to "*/*",
         "Connection" to "keep-alive",
         "Cache-Control" to "no-cache",
         "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
     )
+
+    private companion object {
+        const val LOG_TAG = "VixCloudExtractor"
+    }
 
     override suspend fun getUrl(
         url: String,
@@ -27,25 +33,25 @@ class VixCloudExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d(TAG, "REFERER: $referer  URL: $url")
+        Log.d(LOG_TAG, "REFERER: $referer  URL: $url")
         val playlistUrl = getPlaylistLink(url)
 
-        Log.d(TAG, "FINAL URL: $playlistUrl")
+        Log.d(LOG_TAG, "FINAL URL: $playlistUrl")
 
-        callback.invoke(
+        callback(
             newExtractorLink(
-                source = "VixCloud",
-                name = "AnimeUnity",
+                source = sourceName,
+                name = displayName,
                 url = playlistUrl,
                 type = ExtractorLinkType.M3U8
             ) {
-                this.headers = h
+                this.headers = this@VixCloudExtractor.headers
             }
         )
     }
 
     private suspend fun getPlaylistLink(url: String): String {
-        Log.d(TAG, "Item url: $url")
+        Log.d(LOG_TAG, "Item url: $url")
 
         val script = getScript(url)
         val masterPlaylist = script.getJSONObject("masterPlaylist")
@@ -54,42 +60,43 @@ class VixCloudExtractor : ExtractorApi() {
         val expires = masterPlaylistParams.getString("expires")
         val playlistUrl = masterPlaylist.getString("url")
 
-        var masterPlaylistUrl: String
-        val params = "token=${token}&expires=${expires}"
-        masterPlaylistUrl = if ("?b" in playlistUrl) {
+        val params = "token=$token&expires=$expires"
+        val basePlaylistUrl = if ("?b" in playlistUrl) {
             "${playlistUrl.replace("?b:1", "?b=1")}&$params"
         } else {
             "${playlistUrl}?$params"
         }
-        Log.d(TAG, "masterPlaylistUrl: $masterPlaylistUrl")
-
-        if (script.getBoolean("canPlayFHD")) {
-            masterPlaylistUrl += "&h=1"
+        val masterPlaylistUrl = if (script.getBoolean("canPlayFHD")) {
+            "$basePlaylistUrl&h=1"
+        } else {
+            basePlaylistUrl
         }
 
-        Log.d(TAG, "Master Playlist URL: $masterPlaylistUrl")
+        Log.d(LOG_TAG, "Master Playlist URL: $masterPlaylistUrl")
         return masterPlaylistUrl
     }
 
     private suspend fun getScript(url: String): JSONObject {
-        Log.d(TAG, "Embed url: $url")
+        Log.d(LOG_TAG, "Embed url: $url")
 
-        val iframe = app.get(url, headers = h).document
+        val iframe = app.get(url, headers = headers).document
 
         val scripts = iframe.select("script")
-        val script =
-            scripts.find { it.data().contains("masterPlaylist") }!!.data().replace("\n", "\t")
+        val script = scripts
+            .firstOrNull { it.data().contains("masterPlaylist") }
+            ?.data()
+            ?.replace("\n", "\t")
+            ?: error("Missing VixCloud masterPlaylist script")
 
         val scriptJson = getSanitisedScript(script)
-        Log.d(TAG, "Script Json: $scriptJson")
+        Log.d(LOG_TAG, "Script Json: $scriptJson")
         return JSONObject(scriptJson)
     }
 
     private fun getSanitisedScript(script: String): String {
-        // Split by top-level assignments like window.xxx =
         val parts = Regex("""window\.(\w+)\s*=""")
             .split(script)
-            .drop(1) // first split part is empty before first assignment
+            .drop(1)
 
         val keys = Regex("""window\.(\w+)\s*=""")
             .findAll(script)
@@ -97,12 +104,9 @@ class VixCloudExtractor : ExtractorApi() {
             .toList()
 
         val jsonObjects = keys.zip(parts).map { (key, value) ->
-            // Clean up the value
             val cleaned = value
                 .replace(";", "")
-                // Quote keys only inside objects
                 .replace(Regex("""(\{|\[|,)\s*(\w+)\s*:"""), "$1 \"$2\":")
-                // Remove trailing commas before } or ]
                 .replace(Regex(""",(\s*[}\]])"""), "$1")
                 .trim()
 
