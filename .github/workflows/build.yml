@@ -1,15 +1,13 @@
 name: Build
 
-# https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#concurrency
 concurrency:
   group: "build"
   cancel-in-progress: true
 
 on:
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
   push:
     branches:
-      # choose your default branch
       - master
       - main
     paths-ignore:
@@ -18,15 +16,15 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
         with:
           path: "src"
 
       - name: Checkout builds
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
         with:
           ref: "builds"
           path: "builds"
@@ -35,16 +33,13 @@ jobs:
         run: rm -f $GITHUB_WORKSPACE/builds/*.cs3
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4.6.0
+        uses: actions/setup-java@v4
         with:
-          distribution: adopt
+          distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3.2.2
-        with:
-          packages: 'platform-tools'
-          log-accepted-android-sdk-licenses: false
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Access Secrets
         env:
@@ -65,3 +60,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/builds
           git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add .
+          git commit --amend -m "Build $GITHUB_SHA" || exit 0
+          git push --force
