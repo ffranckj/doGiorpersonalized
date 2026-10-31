@@ -265,7 +265,6 @@ class StreamingCommunity : MainAPI() {
                 title.age?.let { this.contentRating = "$it+" }
                 this.recommendations = related?.titles?.let { searchResponseBuilder(it) }
                 this.addActors(title.mainActors?.map { it.name })
-                this.addRating(title.score)
 
                 title.imdbId?.let { this.addImdbId(it) }
                 title.tmdbId?.let { this.addTMDbId(it.toString()) }
