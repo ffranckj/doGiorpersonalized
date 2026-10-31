@@ -346,7 +346,6 @@ open class AnimeWorldCore(isSplit: Boolean = false) : MainAPI() {
             tags = genres
             addMalId(malId)
             addAniListId(anlId)
-            addRating(rating)
             duration?.let { addDuration(duration) }
             addTrailer(trailerUrl)
             this.recommendations = recommendations
