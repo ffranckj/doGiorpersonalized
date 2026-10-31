@@ -17,7 +17,7 @@ include(
 //    "IPTV",
 //    "OnlineSerieTV",
 //    "SimklProvider",
-    "StreamingCommunity",
+//    "StreamingCommunity",
 //    "TV",
 //    "Torrentio"
 //    "YouTube"
