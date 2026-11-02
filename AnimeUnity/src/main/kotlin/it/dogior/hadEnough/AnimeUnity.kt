@@ -30,6 +30,7 @@ import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.Normalizer
 import java.text.SimpleDateFormat
@@ -703,12 +704,57 @@ class AnimeUnity(
             }
     }
 
-    private suspend fun parseAnimePageData(animePage: org.jsoup.nodes.Document): AnimePageData {
-        val relatedAnimeJsonArray = animePage.select("layout-items").attr("items-json")
-        val relatedAnime = relatedAnimeJsonArray
-            .takeIf(String::isNotBlank)
-            ?.let { runCatching { parseJson<List<Anime>>(it) }.getOrDefault(emptyList()) }
-            ?: emptyList()
+    private fun parseCorrelatedAnimeFromHtml(animePage: Document): List<Anime> {
+        return animePage.select(".related-wrapper .related-item").mapNotNull { item ->
+            val href = item.selectFirst("a[href*=/anime/]")?.attr("href")
+                ?.takeIf(String::isNotBlank)
+                ?: return@mapNotNull null
+
+            val animePath = href
+                .substringAfter("/anime/", "")
+                .substringBefore("?")
+                .substringBefore("#")
+                .trim('/')
+
+            val id = animePath.substringBefore("-").toIntOrNull() ?: return@mapNotNull null
+            val slug = animePath.substringAfter("-", "").takeIf(String::isNotBlank) ?: return@mapNotNull null
+
+            val title = item.selectFirst(".related-anime-title")?.text()?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: return@mapNotNull null
+
+            val imageUrl = item.selectFirst("img")?.attr("src")?.trim().orEmpty()
+            val infoText = item.selectFirst(".related-info")?.text()?.trim().orEmpty()
+            val type = infoText.substringBefore("-").trim().ifBlank { "TV" }
+            val year = infoText.substringAfter("-", "").trim()
+            val isDub = title.contains("(ITA)", ignoreCase = true) || slug.endsWith("-ita")
+
+            Anime(
+                id = id,
+                title = title,
+                imageUrl = imageUrl,
+                plot = "",
+                date = year,
+                episodesCount = if (type.equals("Movie", ignoreCase = true)) 1 else 0,
+                episodesLength = 0,
+                status = "",
+                type = type,
+                slug = slug,
+                titleEng = null,
+                day = null,
+                dub = if (isDub) 1 else 0,
+                cover = null,
+                anilistId = null,
+                titleIt = title,
+                malId = null,
+                episodes = emptyList(),
+                genres = emptyList(),
+            )
+        }
+    }
+
+    private suspend fun parseAnimePageData(animePage: Document): AnimePageData {
+        val relatedAnime = parseCorrelatedAnimeFromHtml(animePage)
 
         val videoPlayer = animePage.select("video-player")
         val anime = parseJson<Anime>(videoPlayer.attr("anime"))
@@ -1123,23 +1169,34 @@ class AnimeUnity(
 
         val primaryAnime = subPageData?.anime ?: dubPageData?.anime ?: currentAnime
         val title = getAnimeTitle(primaryAnime)
-        val relatedAnimes = groupAnimeCards(currentPageData.relatedAnime).amap { entry ->
-            val anime = entry.anime
-            val relatedTitle = getAnimeTitle(anime)
-            val poster = getImage(anime.imageUrl, anime.anilistId)
-            newAnimeSearchResponse(
-                name = withoutDubSuffix(relatedTitle),
-                url = "$mainUrl/anime/${anime.id}-${anime.slug}",
-                type = if (anime.type == "TV") TvType.Anime
-                else if (anime.type == "Movie" || anime.episodesCount == 1) TvType.AnimeMovie
-                else TvType.OVA
-            ) {
-                if (shouldShowDubSub()) {
-                    addDubStatus(getMiniCardDubStatus(entry.hasDub))
-                }
-                addPoster(poster)
-            }
+        val currentNormalizedTitle = normalizeJikanTitle(withoutDubSuffix(title))
+        val excludedIds = setOfNotNull(currentAnime.id, subAnime?.id, dubAnime?.id)
+
+        val filteredCorrelated = currentPageData.relatedAnime.filterNot { related ->
+            related.id in excludedIds ||
+                (shouldMergeVariants &&
+                    normalizeJikanTitle(withoutDubSuffix(getAnimeTitle(related))) == currentNormalizedTitle)
         }
+
+        val relatedAnimes = groupAnimeCards(filteredCorrelated)
+            .sortedBy { it.anime.date.toIntOrNull() ?: Int.MAX_VALUE }
+            .map { entry ->
+                val anime = entry.anime
+                val relatedTitle = getAnimeTitle(anime)
+                val poster = getImage(anime.imageUrl, anime.anilistId)
+                newAnimeSearchResponse(
+                    name = withoutDubSuffix(relatedTitle),
+                    url = "$mainUrl/anime/${anime.id}-${anime.slug}",
+                    type = if (anime.type.equals("TV", ignoreCase = true)) TvType.Anime
+                    else if (anime.type.equals("Movie", ignoreCase = true) || anime.episodesCount == 1) TvType.AnimeMovie
+                    else TvType.OVA
+                ) {
+                    if (shouldShowDubSub()) {
+                        addDubStatus(getMiniCardDubStatus(entry.hasDub))
+                    }
+                    addPoster(poster)
+                }
+            }
 
         val subEpisodeMap = buildEpisodeSourceMap(subPageData?.anime, subPageData?.episodes.orEmpty())
         val dubEpisodeMap = buildEpisodeSourceMap(dubPageData?.anime, dubPageData?.episodes.orEmpty())
@@ -1239,6 +1296,7 @@ class AnimeUnity(
     ): Boolean {
         val playbackData = runCatching { parseJson<EpisodePlaybackData>(data) }.getOrNull()
         val playerSources = playbackData?.let(::buildPlayerSourceOptions)
+            ?.takeIf { it.isNotEmpty() }
             ?.takeIf { it.isNotEmpty() }
             ?: listOf(PlayerSourceOption(label = "[SOURCE]", url = data))
 
