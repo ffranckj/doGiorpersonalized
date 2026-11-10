@@ -1,8 +1,3 @@
-Esatto, intendevo proprio **`AnimeUnityDTOs.kt`** (nel primo messaggio i file erano incollati uno di seguito all'altro senza il nome del file, quindi gli avevo dato un nome generico).
-
-Ecco il tuo **`AnimeUnityDTOs.kt`** aggiornato con il campo `plot` commentato (così combacia perfettamente con l'`AnimeUnity.kt` senza descrizione che ti ho mandato sopra):
-
-```kotlin
 package it.dogior.hadEnough
 
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -240,5 +235,3 @@ data class JikanTrailer(
     @JsonProperty("url") val url: String?,
     @JsonProperty("embed_url") val embedUrl: String?
 )
-
-```
