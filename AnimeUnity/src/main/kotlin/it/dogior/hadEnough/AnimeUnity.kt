@@ -733,7 +733,6 @@ class AnimeUnity(
                 id = id,
                 title = title,
                 imageUrl = imageUrl,
-                plot = "",
                 date = year,
                 episodesCount = if (type.equals("Movie", ignoreCase = true)) 1 else 0,
                 episodesLength = 0,
@@ -1264,7 +1263,6 @@ class AnimeUnity(
                 addTrailer(trailerUrl)
             }
             this.showStatus = getShowStatus(primaryAnime.status)
-            this.plot = primaryAnime.plot
             val audioTag = when {
                 hasSub && hasDub -> "\uD83C\uDDEE\uD83C\uDDF9  Italiano / \uD83C\uDDEF\uD83C\uDDF5  Giapponese"
                 hasDub -> "\uD83C\uDDEE\uD83C\uDDF9  Italiano"
@@ -1296,7 +1294,6 @@ class AnimeUnity(
     ): Boolean {
         val playbackData = runCatching { parseJson<EpisodePlaybackData>(data) }.getOrNull()
         val playerSources = playbackData?.let(::buildPlayerSourceOptions)
-            ?.takeIf { it.isNotEmpty() }
             ?.takeIf { it.isNotEmpty() }
             ?: listOf(PlayerSourceOption(label = "[SOURCE]", url = data))
 
