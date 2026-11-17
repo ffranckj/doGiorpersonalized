@@ -57,7 +57,7 @@ class AnimeUnityPlugin : Plugin() {
         const val PREF_CACHE_MAX_ENTRIES = "cacheMaxEntries"
         const val PREF_CACHE_MAX_SIZE_MB = "cacheMaxSizeMb"
 
-        const val DEFAULT_SITE_URL = "https://www.animeunity.co/"
+        const val DEFAULT_SITE_URL = "https://www.animeunity.so/"
         const val DEFAULT_SECTION_COUNT = 30
         const val MAX_SECTION_COUNT = 100
         const val DEFAULT_ADVANCED_SEARCH_COUNT = MAX_SECTION_COUNT
@@ -86,6 +86,18 @@ class AnimeUnityPlugin : Plugin() {
             pattern = """^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$""",
             option = RegexOption.IGNORE_CASE
         )
+        private val legacyHosts = setOf(
+            "animeunity.co",
+            "www.animeunity.co",
+            "animeunity.to",
+            "www.animeunity.to",
+            "animeunity.tv",
+            "www.animeunity.tv",
+            "animeunity.it",
+            "www.animeunity.it",
+            "animeunity.so"
+        )
+
         private val advancedSearchGenreOptions = listOf(
             ArchiveGenreOption(51, "Action"),
             ArchiveGenreOption(21, "Adventure"),
@@ -166,7 +178,7 @@ class AnimeUnityPlugin : Plugin() {
             if (rawValue.isBlank()) return null
 
             val withoutScheme = rawValue.replaceFirst(siteSchemeRegex, "")
-            val normalizedHost = withoutScheme.trimEnd('/')
+            val normalizedHost = withoutScheme.trimEnd('/').lowercase(Locale.ROOT)
 
             if (normalizedHost.isBlank()) return null
             if (normalizedHost.contains("/") || normalizedHost.contains("?") || normalizedHost.contains("#")) {
@@ -176,7 +188,11 @@ class AnimeUnityPlugin : Plugin() {
                 return null
             }
 
-            return "https://${normalizedHost.lowercase(Locale.ROOT)}/"
+            if (normalizedHost in legacyHosts) {
+                return DEFAULT_SITE_URL
+            }
+
+            return "https://$normalizedHost/"
         }
 
         fun isValidSiteUrl(value: String?): Boolean {
@@ -344,16 +360,5 @@ class AnimeUnityPlugin : Plugin() {
         activeSharedPref = sharedPref
 
         registerMainAPI(AnimeUnity(sharedPref))
-
-        // Se in futuro decidi di aggiungere AnimeUnitySettings.kt e la cartella res,
-        // ti basta decommentare questo blocco e importare androidx.appcompat.app.AppCompatActivity:
-        /*
-        openSettings = { ctx ->
-            val activity = ctx as AppCompatActivity
-            activePlugin = this
-            activeSharedPref = sharedPref
-            AnimeUnitySettings().show(activity.supportFragmentManager, "AnimeUnitySettings")
-        }
-        */
     }
 }
