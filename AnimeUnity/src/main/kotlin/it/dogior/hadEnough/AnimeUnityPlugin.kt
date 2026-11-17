@@ -57,7 +57,7 @@ class AnimeUnityPlugin : Plugin() {
         const val PREF_CACHE_MAX_ENTRIES = "cacheMaxEntries"
         const val PREF_CACHE_MAX_SIZE_MB = "cacheMaxSizeMb"
 
-        const val DEFAULT_SITE_URL = "https://www.animeunity.so/"
+        const val DEFAULT_SITE_URL = "https://animeunity.cx/"
         const val DEFAULT_SECTION_COUNT = 30
         const val MAX_SECTION_COUNT = 100
         const val DEFAULT_ADVANCED_SEARCH_COUNT = MAX_SECTION_COUNT
@@ -89,13 +89,14 @@ class AnimeUnityPlugin : Plugin() {
         private val legacyHosts = setOf(
             "animeunity.co",
             "www.animeunity.co",
+            "animeunity.so",
+            "www.animeunity.so",
             "animeunity.to",
             "www.animeunity.to",
             "animeunity.tv",
             "www.animeunity.tv",
             "animeunity.it",
-            "www.animeunity.it",
-            "animeunity.so"
+            "www.animeunity.it"
         )
 
         private val advancedSearchGenreOptions = listOf(
@@ -113,252 +114,4 @@ class AnimeUnityPlugin : Plugin() {
             ArchiveGenreOption(52, "Gore"),
             ArchiveGenreOption(56, "Gourmet"),
             ArchiveGenreOption(15, "Harem"),
-            ArchiveGenreOption(4, "Hentai"),
-            ArchiveGenreOption(30, "Historical"),
-            ArchiveGenreOption(3, "Horror"),
-            ArchiveGenreOption(53, "Isekai"),
-            ArchiveGenreOption(45, "Josei"),
-            ArchiveGenreOption(14, "Kids"),
-            ArchiveGenreOption(57, "Mahou Shoujo"),
-            ArchiveGenreOption(31, "Martial Arts"),
-            ArchiveGenreOption(38, "Mecha"),
-            ArchiveGenreOption(46, "Military"),
-            ArchiveGenreOption(16, "Music"),
-            ArchiveGenreOption(24, "Mystery"),
-            ArchiveGenreOption(32, "Parody"),
-            ArchiveGenreOption(39, "Police"),
-            ArchiveGenreOption(47, "Psychological"),
-            ArchiveGenreOption(29, "Racing"),
-            ArchiveGenreOption(54, "Reincarnation"),
-            ArchiveGenreOption(17, "Romance"),
-            ArchiveGenreOption(25, "Samurai"),
-            ArchiveGenreOption(33, "School"),
-            ArchiveGenreOption(40, "Sci-fi"),
-            ArchiveGenreOption(49, "Seinen"),
-            ArchiveGenreOption(18, "Shoujo"),
-            ArchiveGenreOption(34, "Shounen"),
-            ArchiveGenreOption(50, "Slice of Life"),
-            ArchiveGenreOption(19, "Space"),
-            ArchiveGenreOption(27, "Sports"),
-            ArchiveGenreOption(35, "Super Power"),
-            ArchiveGenreOption(42, "Supernatural"),
-            ArchiveGenreOption(55, "Survival"),
-            ArchiveGenreOption(48, "Thriller"),
-            ArchiveGenreOption(20, "Vampire"),
-        )
-        private val advancedSearchOrderOptions = listOf(
-            "Lista A-Z",
-            "Lista Z-A",
-            "Popolarità",
-            "Valutazione",
-        )
-        private val advancedSearchStatusOptions = listOf(
-            "In Corso",
-            "Terminato",
-            "In Uscita",
-            "Droppato",
-        )
-        private val advancedSearchTypeOptions = listOf(
-            "TV",
-            "TV Short",
-            "OVA",
-            "ONA",
-            "Special",
-            "Movie",
-        )
-        private val advancedSearchSeasonOptions = listOf(
-            "Inverno",
-            "Primavera",
-            "Estate",
-            "Autunno",
-        )
-
-        private fun normalizeSiteUrl(value: String?): String? {
-            val rawValue = value?.trim().orEmpty()
-            if (rawValue.isBlank()) return null
-
-            val withoutScheme = rawValue.replaceFirst(siteSchemeRegex, "")
-            val normalizedHost = withoutScheme.trimEnd('/').lowercase(Locale.ROOT)
-
-            if (normalizedHost.isBlank()) return null
-            if (normalizedHost.contains("/") || normalizedHost.contains("?") || normalizedHost.contains("#")) {
-                return null
-            }
-            if (!validSiteHostRegex.matches(normalizedHost)) {
-                return null
-            }
-
-            if (normalizedHost in legacyHosts) {
-                return DEFAULT_SITE_URL
-            }
-
-            return "https://$normalizedHost/"
-        }
-
-        fun isValidSiteUrl(value: String?): Boolean {
-            return normalizeSiteUrl(value) != null
-        }
-
-        fun getValidatedSiteUrl(value: String?): String {
-            return normalizeSiteUrl(value) ?: DEFAULT_SITE_URL
-        }
-
-        fun getConfiguredSiteUrl(sharedPref: SharedPreferences?): String {
-            return getValidatedSiteUrl(sharedPref?.getString(PREF_SITE_URL, null))
-        }
-
-        fun getConfiguredBaseUrl(sharedPref: SharedPreferences?): String {
-            return getConfiguredSiteUrl(sharedPref).removeSuffix("/")
-        }
-
-        fun getValidatedSectionOrder(value: String?): String {
-            val normalizedSections = value
-                ?.split(",")
-                ?.map { it.trim().lowercase(Locale.ROOT) }
-                ?.filter { it in validSectionKeys }
-                ?.distinct()
-                .orEmpty()
-
-            return if (normalizedSections.isEmpty()) {
-                DEFAULT_SECTION_ORDER
-            } else {
-                (normalizedSections + defaultSectionKeys.filterNot { it in normalizedSections })
-                    .joinToString(",")
-            }
-        }
-
-        fun getConfiguredSectionOrder(sharedPref: SharedPreferences?): String {
-            return getValidatedSectionOrder(sharedPref?.getString(PREF_SECTION_ORDER, null))
-        }
-
-        fun getConfiguredSectionTitle(
-            sharedPref: SharedPreferences?,
-            prefKey: String,
-            fallback: String,
-        ): String {
-            return sharedPref?.getString(prefKey, null)
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-                ?: fallback
-        }
-
-        fun shouldUseUnifiedDubSubCards(sharedPref: SharedPreferences?): Boolean {
-            return sharedPref?.getBoolean(
-                PREF_UNIFY_DUB_SUB_CARDS,
-                DEFAULT_UNIFY_DUB_SUB_CARDS,
-            ) ?: DEFAULT_UNIFY_DUB_SUB_CARDS
-        }
-
-        fun getAdvancedSearchGenres(): List<ArchiveGenreOption> {
-            return advancedSearchGenreOptions
-        }
-
-        fun getAdvancedSearchYearOptions(): List<String> {
-            val latestYear = Calendar.getInstance().get(Calendar.YEAR) + 1
-            return (latestYear downTo ARCHIVE_OLDEST_YEAR).map(Int::toString)
-        }
-
-        fun getAdvancedSearchOrderOptions(): List<String> {
-            return advancedSearchOrderOptions
-        }
-
-        fun getAdvancedSearchStatusOptions(): List<String> {
-            return advancedSearchStatusOptions
-        }
-
-        fun getAdvancedSearchTypeOptions(): List<String> {
-            return advancedSearchTypeOptions
-        }
-
-        fun getAdvancedSearchSeasonOptions(): List<String> {
-            return advancedSearchSeasonOptions
-        }
-
-        private fun getValidatedAdvancedOption(
-            value: String?,
-            options: List<String>,
-        ): String? {
-            val normalizedValue = value?.trim().orEmpty()
-            if (normalizedValue.isBlank()) return null
-            return options.firstOrNull { it.equals(normalizedValue, ignoreCase = true) }
-        }
-
-        fun getAdvancedSearchConfig(sharedPref: SharedPreferences?): AdvancedSearchConfig {
-            val genreId = sharedPref?.getInt(PREF_ADVANCED_SEARCH_GENRE_ID, -1) ?: -1
-
-            return AdvancedSearchConfig(
-                enabled = sharedPref?.getBoolean(PREF_ENABLE_ADVANCED_SEARCH, false) ?: false,
-                title = sharedPref?.getString(PREF_ADVANCED_SEARCH_TITLE, null)?.trim().orEmpty(),
-                genre = advancedSearchGenreOptions.firstOrNull { it.id == genreId },
-                year = getValidatedAdvancedOption(
-                    sharedPref?.getString(PREF_ADVANCED_SEARCH_YEAR, null),
-                    getAdvancedSearchYearOptions(),
-                ),
-                order = getValidatedAdvancedOption(
-                    sharedPref?.getString(PREF_ADVANCED_SEARCH_ORDER, null),
-                    advancedSearchOrderOptions,
-                ),
-                status = getValidatedAdvancedOption(
-                    sharedPref?.getString(PREF_ADVANCED_SEARCH_STATUS, null),
-                    advancedSearchStatusOptions,
-                ),
-                type = getValidatedAdvancedOption(
-                    sharedPref?.getString(PREF_ADVANCED_SEARCH_TYPE, null),
-                    advancedSearchTypeOptions,
-                ),
-                season = getValidatedAdvancedOption(
-                    sharedPref?.getString(PREF_ADVANCED_SEARCH_SEASON, null),
-                    advancedSearchSeasonOptions,
-                ),
-            )
-        }
-
-        fun isAdvancedSearchEnabled(sharedPref: SharedPreferences?): Boolean {
-            return getAdvancedSearchConfig(sharedPref).enabled
-        }
-
-        fun getAdvancedSearchRequestData(sharedPref: SharedPreferences?): RequestData {
-            val config = getAdvancedSearchConfig(sharedPref)
-
-            return RequestData(
-                title = config.title,
-                type = config.type?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                year = config.year?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                orderBy = config.order?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                status = config.status?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                genres = config.genre?.let { listOf(it) } ?: BooleanOrString.AsBoolean(false),
-                season = config.season?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                dubbed = 0,
-            )
-        }
-
-        fun getCacheMaxEntries(sharedPref: SharedPreferences?): Int {
-            return (sharedPref?.getInt(PREF_CACHE_MAX_ENTRIES, DEFAULT_CACHE_MAX_ENTRIES)
-                ?: DEFAULT_CACHE_MAX_ENTRIES)
-                .coerceIn(MIN_CACHE_MAX_ENTRIES, MAX_CACHE_MAX_ENTRIES)
-        }
-
-        fun getCacheMaxSizeMb(sharedPref: SharedPreferences?): Int {
-            return (sharedPref?.getInt(PREF_CACHE_MAX_SIZE_MB, DEFAULT_CACHE_MAX_SIZE_MB)
-                ?: DEFAULT_CACHE_MAX_SIZE_MB)
-                .coerceIn(MIN_CACHE_MAX_SIZE_MB, MAX_CACHE_MAX_SIZE_MB)
-        }
-
-        fun getCacheMaxBytes(sharedPref: SharedPreferences?): Long {
-            return getCacheMaxSizeMb(sharedPref) * 1024L * 1024L
-        }
-
-        internal var activePlugin: AnimeUnityPlugin? = null
-        internal var activeSharedPref: SharedPreferences? = null
-    }
-
-    private var sharedPref: SharedPreferences? = null
-
-    override fun load(context: Context) {
-        sharedPref = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        activePlugin = this
-        activeSharedPref = sharedPref
-
-        registerMainAPI(AnimeUnity(sharedPref))
-    }
-}
+            ArchiveGenreOption(4
