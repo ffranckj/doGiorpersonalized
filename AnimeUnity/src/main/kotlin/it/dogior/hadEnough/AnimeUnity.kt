@@ -30,8 +30,6 @@ import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -57,8 +55,6 @@ class AnimeUnity(
     override var lang = "it"
     override val hasMainPage = true
 
-    private val sessionMutex = Mutex()
-
     companion object {
         @Suppress("ConstPropertyName")
         const val mainUrl = AnimeUnityPlugin.DEFAULT_SITE_URL
@@ -76,9 +72,10 @@ class AnimeUnity(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
 
         var name = "AnimeUnity"
-        var headers = mapOf(
+        @Volatile
+        var headers = mutableMapOf(
             "User-Agent" to USER_AGENT
-        ).toMutableMap()
+        )
     }
 
     private data class ArchivePageResult(
@@ -426,24 +423,23 @@ class AnimeUnity(
     }
 
     private fun getPageHeaders(): Map<String, String> {
+        val currentHeaders = headers
         return buildMap {
             put("User-Agent", USER_AGENT)
             put("Referer", "$mainUrl/")
-            headers["Cookie"]?.takeIf(String::isNotBlank)?.let { put("Cookie", it) }
+            currentHeaders["Cookie"]?.takeIf(String::isNotBlank)?.let { put("Cookie", it) }
         }
     }
 
     private suspend fun ensureHeadersAndCookies(forceReset: Boolean = false) {
-        sessionMutex.withLock {
-            val shouldRefreshHeaders = forceReset ||
-                headers["Referer"] != "$mainUrl/archivio" ||
-                headers["Cookie"].isNullOrBlank() ||
-                headers["X-CSRF-Token"].isNullOrBlank()
+        val currentHeaders = headers
+        val shouldRefreshHeaders = forceReset ||
+            currentHeaders["Referer"] != "$mainUrl/archivio" ||
+            currentHeaders["Cookie"].isNullOrBlank() ||
+            currentHeaders["X-CSRF-Token"].isNullOrBlank()
 
-            if (shouldRefreshHeaders) {
-                resetHeadersAndCookies()
-                setupHeadersAndCookies()
-            }
+        if (shouldRefreshHeaders) {
+            setupHeadersAndCookies()
         }
     }
 
@@ -470,22 +466,18 @@ class AnimeUnity(
             .entries
             .joinToString("; ") { "${it.key}=${it.value}" }
 
-        val h = buildMap {
-            put("User-Agent", USER_AGENT)
-            put("X-Requested-With", "XMLHttpRequest")
-            put("Content-Type", "application/json;charset=utf-8")
-            put("Origin", mainUrl)
-            put("Referer", "$mainUrl/archivio")
-            if (csrfToken.isNotBlank()) put("X-CSRF-Token", csrfToken)
-            if (decodedXsrf.isNotBlank()) put("X-XSRF-TOKEN", decodedXsrf)
-            if (cookies.isNotBlank()) put("Cookie", cookies)
-        }
-        headers.putAll(h)
-    }
+        val newHeaders = mutableMapOf(
+            "User-Agent" to USER_AGENT,
+            "X-Requested-With" to "XMLHttpRequest",
+            "Content-Type" to "application/json;charset=utf-8",
+            "Origin" to mainUrl,
+            "Referer" to "$mainUrl/archivio"
+        )
+        if (csrfToken.isNotBlank()) newHeaders["X-CSRF-Token"] = csrfToken
+        if (decodedXsrf.isNotBlank()) newHeaders["X-XSRF-TOKEN"] = decodedXsrf
+        if (cookies.isNotBlank()) newHeaders["Cookie"] = cookies
 
-    private fun resetHeadersAndCookies() {
-        headers.clear()
-        headers["User-Agent"] = USER_AGENT
+        headers = newHeaders
     }
 
     private suspend fun searchResponseBuilder(objectList: List<Anime>, episodeNumber: Int? = null): List<SearchResponse> {
@@ -515,12 +507,14 @@ class AnimeUnity(
 
     private suspend fun fetchArchiveBatch(url: String, requestData: RequestData): ApiResponse {
         ensureHeadersAndCookies()
-        var response = app.post(url, headers = headers, requestBody = requestData.toRequestBody())
+        val targetUrl = if (url.contains("/archivio/get-animes")) "$mainUrl/archivio/get-animes" else url
+        var response = app.post(targetUrl, headers = headers, requestBody = requestData.toRequestBody())
         if (response.code in listOf(403, 419, 421) || !response.text.trimStart().startsWith("{")) {
             ensureHeadersAndCookies(forceReset = true)
-            response = app.post(url, headers = headers, requestBody = requestData.toRequestBody())
+            response = app.post(targetUrl, headers = headers, requestBody = requestData.toRequestBody())
         }
-        return parseJson<ApiResponse>(response.text)
+        return runCatching { parseJson<ApiResponse>(response.text) }
+            .getOrElse { ApiResponse(titles = emptyList(), total = 0) }
     }
 
     private suspend fun fetchArchiveSectionPage(
@@ -822,7 +816,7 @@ class AnimeUnity(
         if (totalEpisodes > 120) {
             for (i in 2..range) {
                 val endRange = if (i == range) totalEpisodes else i * 120
-                val infoUrl = "$mainUrl/info_api/${anime.id}/1?start_range=${1 + (i - 1) * 120}&end_range=${endRange}"
+                val infoUrl = "$mainUrl/info_api/${anime.id}/1?start_range=${1 + (i - 1) * 120}&end_range=$endRange"
                 val info = app.get(infoUrl, headers = getPageHeaders()).text
                 val animeInfo = parseJson<AnimeInfo>(info)
                 episodes.addAll(animeInfo.episodes)
@@ -1011,7 +1005,7 @@ class AnimeUnity(
             return getRandomMainPage(page, request.name, sectionData.baseUrl)
         }
 
-        val url = sectionData.baseUrl + "get-animes"
+        val url = "$mainUrl/archivio/get-animes"
         ensureHeadersAndCookies()
 
         val requestData = getDataPerHomeSection(sectionData.key)
@@ -1215,7 +1209,7 @@ class AnimeUnity(
 
         val relatedAnimes = groupAnimeCards(filteredCorrelated)
             .sortedBy { it.anime.date.toIntOrNull() ?: Int.MAX_VALUE }
-            .map { entry ->
+            .amap { entry ->
                 val anime = entry.anime
                 val relatedTitle = getAnimeTitle(anime)
                 val poster = getImage(anime.imageUrl, anime.anilistId)
@@ -1304,7 +1298,7 @@ class AnimeUnity(
                 hasDub -> "\uD83C\uDDEE\uD83C\uDDF9  Italiano"
                 else -> "\uD83C\uDDEF\uD83C\uDDF5  Giapponese"
             }
-            this.tags = listOfNotNull(audioTag, getStatusTag(primaryAnime.status)) + primaryAnime.genres.map { genre ->
+            this.tags = listOfNotNull(audioTag, getStatusTag(primaryAnime.status)) + primaryAnime.genres.orEmpty().map { genre ->
                 genre.name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             }
             this.comingSoon = primaryAnime.status == "In uscita prossimamente"
@@ -1338,21 +1332,4 @@ class AnimeUnity(
 
         playerSources.forEach { playerSource ->
             val document = app.get(playerSource.url, headers = getPageHeaders()).document
-            val sourceUrl = document.select("video-player").attr("embed_url")
-            if (sourceUrl.isBlank()) return@forEach
-
-            val sourceSuffix = if (shouldLabelSources) " ${playerSource.label}" else ""
-            VixCloudExtractor(
-                sourceName = "VixCloud$sourceSuffix",
-                displayName = "AnimeUnity$sourceSuffix",
-            ).getUrl(
-                url = sourceUrl,
-                referer = mainUrl,
-                subtitleCallback = subtitleCallback,
-                callback = callback
-            )
-        }
-
-        return true
-    }
-}
+            val source
