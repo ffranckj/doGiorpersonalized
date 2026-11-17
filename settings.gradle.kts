@@ -9,7 +9,7 @@ include(
     "AnimeUnity",
 //    "AnimeWorld",
 //    "Arte",
-    "CalcioStreaming",
+//    "CalcioStreaming",
 //    "CB01",
 //    "CorsaroNero",
 //    "DaddyLive",
