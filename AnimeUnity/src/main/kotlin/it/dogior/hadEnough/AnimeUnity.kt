@@ -1332,4 +1332,21 @@ class AnimeUnity(
 
         playerSources.forEach { playerSource ->
             val document = app.get(playerSource.url, headers = getPageHeaders()).document
-            val source
+            val sourceUrl = document.select("video-player").attr("embed_url")
+            if (sourceUrl.isBlank()) return@forEach
+
+            val sourceSuffix = if (shouldLabelSources) " ${playerSource.label}" else ""
+            VixCloudExtractor(
+                sourceName = "VixCloud$sourceSuffix",
+                displayName = "AnimeUnity$sourceSuffix",
+            ).getUrl(
+                url = sourceUrl,
+                referer = "$mainUrl/",
+                subtitleCallback = subtitleCallback,
+                callback = callback
+            )
+        }
+
+        return true
+    }
+}
