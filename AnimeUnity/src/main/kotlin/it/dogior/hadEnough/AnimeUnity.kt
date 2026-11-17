@@ -45,8 +45,11 @@ typealias Str = BooleanOrString.AsString
 class AnimeUnity(
     private val sharedPref: SharedPreferences? = null,
 ) : MainAPI() {
+    @Volatile
+    private var resolvedBaseUrl: String? = null
+
     override var mainUrl = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
-        get() = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
+        get() = resolvedBaseUrl ?: AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
         set(value) {
             field = value
         }
@@ -444,14 +447,22 @@ class AnimeUnity(
     }
 
     private suspend fun setupHeadersAndCookies() {
+        val configuredBase = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
+        val initialBase = resolvedBaseUrl ?: configuredBase
         val response = app.get(
-            "$mainUrl/archivio",
+            "$initialBase/archivio",
             headers = mapOf(
                 "User-Agent" to USER_AGENT,
-                "Referer" to "$mainUrl/"
+                "Referer" to "$initialBase/"
             )
         )
 
+        runCatching {
+            val finalHttpUrl = response.url.toHttpUrl()
+            resolvedBaseUrl = "${finalHttpUrl.scheme}://${finalHttpUrl.host}"
+        }
+
+        val activeBase = resolvedBaseUrl ?: initialBase
         val metaCsrf = response.document.head().select("meta[name=csrf-token]").attr("content").trim()
         val rawXsrf = response.cookies["XSRF-TOKEN"].orEmpty()
         val decodedXsrf = if (rawXsrf.isNotBlank()) {
@@ -470,8 +481,8 @@ class AnimeUnity(
             "User-Agent" to USER_AGENT,
             "X-Requested-With" to "XMLHttpRequest",
             "Content-Type" to "application/json;charset=utf-8",
-            "Origin" to mainUrl,
-            "Referer" to "$mainUrl/archivio"
+            "Origin" to activeBase,
+            "Referer" to "$activeBase/archivio"
         )
         if (csrfToken.isNotBlank()) newHeaders["X-CSRF-Token"] = csrfToken
         if (decodedXsrf.isNotBlank()) newHeaders["X-XSRF-TOKEN"] = decodedXsrf
@@ -507,11 +518,12 @@ class AnimeUnity(
 
     private suspend fun fetchArchiveBatch(url: String, requestData: RequestData): ApiResponse {
         ensureHeadersAndCookies()
-        val targetUrl = if (url.contains("/archivio/get-animes")) "$mainUrl/archivio/get-animes" else url
+        val targetUrl = "$mainUrl/archivio/get-animes"
         var response = app.post(targetUrl, headers = headers, requestBody = requestData.toRequestBody())
         if (response.code in listOf(403, 419, 421) || !response.text.trimStart().startsWith("{")) {
             ensureHeadersAndCookies(forceReset = true)
-            response = app.post(targetUrl, headers = headers, requestBody = requestData.toRequestBody())
+            val retryUrl = "$mainUrl/archivio/get-animes"
+            response = app.post(retryUrl, headers = headers, requestBody = requestData.toRequestBody())
         }
         return runCatching { parseJson<ApiResponse>(response.text) }
             .getOrElse { ApiResponse(titles = emptyList(), total = 0) }
@@ -1005,8 +1017,8 @@ class AnimeUnity(
             return getRandomMainPage(page, request.name, sectionData.baseUrl)
         }
 
-        val url = "$mainUrl/archivio/get-animes"
         ensureHeadersAndCookies()
+        val url = "$mainUrl/archivio/get-animes"
 
         val requestData = getDataPerHomeSection(sectionData.key)
         val sectionCount = getSectionCount(sectionData.key)
@@ -1061,7 +1073,7 @@ class AnimeUnity(
     private suspend fun getCalendarMainPage(
         page: Int,
         sectionTitle: String,
-        requestUrl: String,
+        @Suppress("UNUSED_PARAMETER") requestUrl: String,
     ): HomePageResponse {
         val currentDay = getCurrentItalianDayName()
         val calendarTitle = "$sectionTitle ($currentDay)"
@@ -1075,7 +1087,7 @@ class AnimeUnity(
         }
 
         ensureHeadersAndCookies()
-        val calendarAnime = app.get(requestUrl, headers = getPageHeaders()).document
+        val calendarAnime = app.get("$mainUrl/calendario", headers = getPageHeaders()).document
             .select("calendario-item")
             .mapNotNull { item ->
                 val animeJson = item.attr("a")
@@ -1122,10 +1134,10 @@ class AnimeUnity(
     private suspend fun getRandomMainPage(
         page: Int,
         sectionTitle: String,
-        requestUrl: String,
+        @Suppress("UNUSED_PARAMETER") requestUrl: String,
     ): HomePageResponse {
-        val url = "${requestUrl}get-animes"
         ensureHeadersAndCookies()
+        val url = "$mainUrl/archivio/get-animes"
 
         val sectionCount = getSectionCount("random")
         val (titles, total) = fetchRandomTitles(url, sectionCount)
@@ -1164,6 +1176,7 @@ class AnimeUnity(
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        ensureHeadersAndCookies()
         val url = "$mainUrl/archivio/get-animes"
         val responseObject = fetchArchiveBatch(url, RequestData(title = query, dubbed = 0))
         val titles = responseObject.titles ?: emptyList()
@@ -1173,7 +1186,13 @@ class AnimeUnity(
 
     override suspend fun load(url: String): LoadResponse {
         ensureHeadersAndCookies()
-        val animePage = app.get(url, headers = getPageHeaders()).document
+        val targetUrl = if (url.startsWith("http")) {
+            val path = url.toHttpUrl().encodedPath
+            "$mainUrl$path"
+        } else {
+            "$mainUrl/${url.trimStart('/')}"
+        }
+        val animePage = app.get(targetUrl, headers = getPageHeaders()).document
         val currentPageData = parseAnimePageData(animePage)
         val currentAnime = currentPageData.anime
         val shouldMergeVariants = shouldUseUnifiedDubSubCards()
@@ -1331,7 +1350,13 @@ class AnimeUnity(
         val shouldLabelSources = playerSources.size > 1
 
         playerSources.forEach { playerSource ->
-            val document = app.get(playerSource.url, headers = getPageHeaders()).document
+            val targetUrl = if (playerSource.url.startsWith("http")) {
+                val path = playerSource.url.toHttpUrl().encodedPath
+                "$mainUrl$path"
+            } else {
+                "$mainUrl/${playerSource.url.trimStart('/')}"
+            }
+            val document = app.get(targetUrl, headers = getPageHeaders()).document
             val sourceUrl = document.select("video-player").attr("embed_url")
             if (sourceUrl.isBlank()) return@forEach
 
