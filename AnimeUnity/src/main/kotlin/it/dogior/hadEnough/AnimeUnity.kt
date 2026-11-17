@@ -1,8 +1,10 @@
 package it.dogior.hadEnough
 
 import android.content.SharedPreferences
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.AnimeSearchResponse
 import com.lagradost.cloudstream3.DubStatus
+import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
@@ -23,15 +25,19 @@ import com.lagradost.cloudstream3.addPoster
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mainPageOf
+import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.newAnimeLoadResponse
 import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URLDecoder
 import java.text.Normalizer
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -44,14 +50,23 @@ class AnimeUnity(
     private val sharedPref: SharedPreferences? = null,
 ) : MainAPI() {
     override var mainUrl = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
-        get() = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
+        get() = resolvedBaseUrl ?: AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref).trimEnd('/')
         set(value) {
-            field = value
+            field = value.trimEnd('/')
         }
     override var name = Companion.name
     override var supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
     override var lang = "it"
     override val hasMainPage = true
+
+    private val sessionMutex = Mutex()
+    private val cfKiller by lazy { CloudflareKiller() }
+
+    @Volatile
+    private var resolvedBaseUrl: String? = null
+
+    @Volatile
+    private var useCloudflareBypass: Boolean = false
 
     companion object {
         @Suppress("ConstPropertyName")
@@ -66,11 +81,13 @@ class AnimeUnity(
         const val bestSectionName = "I migliori"
         const val upcomingSectionName = "In Arrivo"
 
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+
         var name = "AnimeUnity"
-        var headers = mapOf(
-            "Host" to mainUrl.toHttpUrl().host,
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
-        ).toMutableMap()
+        var headers = mutableMapOf(
+            "User-Agent" to USER_AGENT
+        )
     }
 
     private data class ArchivePageResult(
@@ -105,10 +122,10 @@ class AnimeUnity(
         val url: String,
     )
 
-    private data class EpisodePlaybackData(
-        val preferredUrl: String,
-        val subUrl: String?,
-        val dubUrl: String?,
+    data class EpisodePlaybackData(
+        @JsonProperty("preferredUrl") val preferredUrl: String,
+        @JsonProperty("subUrl") val subUrl: String? = null,
+        @JsonProperty("dubUrl") val dubUrl: String? = null,
     )
 
     private data class PlayerSourceOption(
@@ -261,11 +278,11 @@ class AnimeUnity(
     }
 
     private fun getAnimeTitle(anime: Anime): String {
-        return anime.titleIt ?: anime.titleEng ?: anime.title!!
+        return anime.titleIt ?: anime.titleEng ?: anime.title.orEmpty()
     }
 
     private fun getAnimeTitle(anime: LatestEpisodeAnime): String {
-        return anime.titleIt ?: anime.titleEng ?: anime.title!!
+        return anime.titleIt ?: anime.titleEng ?: anime.title.orEmpty()
     }
 
     private fun isDubAnime(anime: Anime): Boolean {
@@ -417,42 +434,121 @@ class AnimeUnity(
         response.addPoster(poster)
     }
 
-    private suspend fun ensureHeadersAndCookies(forceReset: Boolean = false) {
-        val currentHost = mainUrl.toHttpUrl().host
-        val shouldRefreshHeaders = forceReset ||
-            headers["Host"] != currentHost ||
-            headers["Referer"] != mainUrl ||
-            !headers.containsKey("Cookie")
+    private fun getPageHeaders(): Map<String, String> {
+        val base = mainUrl
+        return buildMap {
+            put("User-Agent", headers["User-Agent"] ?: USER_AGENT)
+            put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            put("Accept-Language", "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7")
+            put("Referer", "$base/")
+            headers["Cookie"]?.takeIf(String::isNotBlank)?.let { put("Cookie", it) }
+        }
+    }
 
-        if (shouldRefreshHeaders) {
-            resetHeadersAndCookies()
-            setupHeadersAndCookies()
+    private fun getApiPostHeaders(): Map<String, String> {
+        val base = mainUrl
+        return buildMap {
+            put("User-Agent", headers["User-Agent"] ?: USER_AGENT)
+            put("Accept", "application/json, text/plain, */*")
+            put("Accept-Language", "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7")
+            put("Content-Type", "application/json;charset=utf-8")
+            put("X-Requested-With", "XMLHttpRequest")
+            put("Origin", base)
+            put("Referer", "$base/archivio")
+            headers["X-CSRF-Token"]?.takeIf(String::isNotBlank)?.let { put("X-CSRF-Token", it) }
+            headers["X-XSRF-TOKEN"]?.takeIf(String::isNotBlank)?.let { put("X-XSRF-TOKEN", it) }
+            headers["Cookie"]?.takeIf(String::isNotBlank)?.let { put("Cookie", it) }
+        }
+    }
+
+    private suspend fun ensureHeadersAndCookies(forceReset: Boolean = false) {
+        sessionMutex.withLock {
+            val shouldRefreshHeaders = forceReset ||
+                headers["Cookie"].isNullOrBlank() ||
+                (headers["X-CSRF-Token"].isNullOrBlank() && headers["X-XSRF-TOKEN"].isNullOrBlank())
+
+            if (shouldRefreshHeaders) {
+                resetHeadersAndCookies()
+                setupHeadersAndCookies()
+            }
         }
     }
 
     private suspend fun setupHeadersAndCookies() {
-        val response = app.get("$mainUrl/archivio", headers = headers)
+        val configuredUrl = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref).trimEnd('/')
+        val targetUrl = "${resolvedBaseUrl ?: configuredUrl}/archivio"
 
-        val csrfToken = response.document.head().select("meta[name=csrf-token]").attr("content")
-        val cookies =
-            "XSRF-TOKEN=${response.cookies["XSRF-TOKEN"]}; animeunity_session=${response.cookies["animeunity_session"]}"
-        val h = mapOf(
-            "X-Requested-With" to "XMLHttpRequest",
-            "Content-Type" to "application/json;charset=utf-8",
-            "X-CSRF-Token" to csrfToken,
-            "Referer" to mainUrl,
-            "Cookie" to cookies
-        )
-        headers.putAll(h)
+        var response = runCatching {
+            app.get(
+                targetUrl,
+                headers = mapOf(
+                    "User-Agent" to USER_AGENT,
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+                ),
+                interceptor = if (useCloudflareBypass) cfKiller else null
+            )
+        }.getOrNull()
+
+        if (response == null || response.code == 403 || response.code == 503 || response.code == 421) {
+            useCloudflareBypass = true
+            response = runCatching {
+                app.get(
+                    targetUrl,
+                    headers = mapOf("User-Agent" to USER_AGENT),
+                    interceptor = cfKiller
+                )
+            }.getOrNull() ?: return
+        }
+
+        // Aggiorna automaticamente il dominio se c'è stato un redirect (es. verso www. o nuovo TLD)
+        runCatching {
+            val finalHttpUrl = response.url.toHttpUrl()
+            resolvedBaseUrl = "${finalHttpUrl.scheme}://${finalHttpUrl.host}"
+        }
+
+        val metaCsrf = response.document.head().select("meta[name=csrf-token]").attr("content").trim()
+        val rawXsrfCookie = response.cookies["XSRF-TOKEN"].orEmpty()
+        val decodedXsrf = if (rawXsrfCookie.isNotBlank()) {
+            runCatching { URLDecoder.decode(rawXsrfCookie, "UTF-8") }.getOrDefault(rawXsrfCookie)
+        } else {
+            ""
+        }
+
+        val csrfToken = metaCsrf.ifBlank { decodedXsrf }
+
+        val validCookies = response.cookies
+            .filter { (k, v) -> k.isNotBlank() && v.isNotBlank() && v != "null" }
+            .entries
+            .joinToString("; ") { "${it.key}=${it.value}" }
+
+        val cfSavedHeaders = if (useCloudflareBypass) {
+            runCatching { cfKiller.getCookieHeaders(resolvedBaseUrl ?: configuredUrl).toMap() }.getOrDefault(emptyMap())
+        } else {
+            emptyMap()
+        }
+
+        val mergedCookies = listOfNotNull(
+            validCookies.takeIf(String::isNotBlank),
+            cfSavedHeaders["Cookie"]?.takeIf(String::isNotBlank)
+        ).joinToString("; ")
+
+        val effectiveUserAgent = cfSavedHeaders["User-Agent"]
+            ?: cfSavedHeaders["user-agent"]
+            ?: USER_AGENT
+
+        val base = resolvedBaseUrl ?: configuredUrl
+        headers["User-Agent"] = effectiveUserAgent
+        headers["Referer"] = "$base/archivio"
+        headers["Origin"] = base
+        if (csrfToken.isNotBlank()) headers["X-CSRF-Token"] = csrfToken
+        if (decodedXsrf.isNotBlank()) headers["X-XSRF-TOKEN"] = decodedXsrf
+        if (mergedCookies.isNotBlank()) headers["Cookie"] = mergedCookies
     }
 
     private fun resetHeadersAndCookies() {
-        if (headers.isNotEmpty()) {
-            headers.clear()
-        }
-        headers["Host"] = mainUrl.toHttpUrl().host
-        headers["User-Agent"] =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+        headers.clear()
+        headers["User-Agent"] = USER_AGENT
     }
 
     private suspend fun searchResponseBuilder(objectList: List<Anime>, episodeNumber: Int? = null): List<SearchResponse> {
@@ -480,9 +576,43 @@ class AnimeUnity(
         }
     }
 
-    private suspend fun fetchArchiveBatch(url: String, requestData: RequestData): ApiResponse {
-        val response = app.post(url, headers = headers, requestBody = requestData.toRequestBody())
-        return parseJson<ApiResponse>(response.text)
+    private suspend fun fetchArchiveBatch(
+        @Suppress("UNUSED_PARAMETER") url: String,
+        requestData: RequestData,
+    ): ApiResponse {
+        ensureHeadersAndCookies()
+        val endpoint = "$mainUrl/archivio/get-animes"
+
+        var response = runCatching {
+            app.post(
+                endpoint,
+                headers = getApiPostHeaders(),
+                requestBody = requestData.toRequestBody(),
+                interceptor = if (useCloudflareBypass) cfKiller else null
+            )
+        }.getOrNull()
+
+        val bodyText = response?.text?.trimStart().orEmpty()
+        if (response == null || response.code in listOf(403, 419, 421, 503) || !bodyText.startsWith("{")) {
+            ensureHeadersAndCookies(forceReset = true)
+            val retryEndpoint = "$mainUrl/archivio/get-animes"
+            response = runCatching {
+                app.post(
+                    retryEndpoint,
+                    headers = getApiPostHeaders(),
+                    requestBody = requestData.toRequestBody(),
+                    interceptor = if (useCloudflareBypass) cfKiller else null
+                )
+            }.getOrNull()
+        }
+
+        val finalText = response?.text?.trim().orEmpty()
+        if (!finalText.startsWith("{")) {
+            return ApiResponse(titles = emptyList(), total = 0)
+        }
+
+        return runCatching { parseJson<ApiResponse>(finalText) }
+            .getOrElse { ApiResponse(titles = emptyList(), total = 0) }
     }
 
     private suspend fun fetchArchiveSectionPage(
@@ -594,11 +724,15 @@ class AnimeUnity(
     }
 
     private suspend fun getImage(imageUrl: String?, anilistId: Int?): String? {
-        if (!imageUrl.isNullOrEmpty()) {
+        if (!imageUrl.isNullOrBlank()) {
             try {
                 val fileName = imageUrl.substringAfterLast("/")
-                return "https://${getImageCdnHost()}/anime/$fileName"
-            } catch (_: Exception) {}
+                if (fileName.isNotBlank()) {
+                    return "https://${getImageCdnHost()}/anime/$fileName"
+                }
+            } catch (_: Exception) {
+            }
+            if (imageUrl.startsWith("http")) return imageUrl
         }
         return anilistId?.let { getAnilistPoster(it) }
     }
@@ -755,9 +889,15 @@ class AnimeUnity(
     private suspend fun parseAnimePageData(animePage: Document): AnimePageData {
         val relatedAnime = parseCorrelatedAnimeFromHtml(animePage)
 
-        val videoPlayer = animePage.select("video-player")
-        val anime = parseJson<Anime>(videoPlayer.attr("anime"))
-        val initialEpisodes = parseJson<List<Episode>>(videoPlayer.attr("episodes"))
+        val videoPlayer = animePage.selectFirst("video-player")
+            ?: throw ErrorLoadingException("Elemento video-player non trovato nella pagina")
+
+        val animeJson = videoPlayer.attr("anime").takeIf(String::isNotBlank)
+            ?: throw ErrorLoadingException("Dati anime mancanti nella pagina")
+        val episodesJson = videoPlayer.attr("episodes").takeIf(String::isNotBlank) ?: "[]"
+
+        val anime = parseJson<Anime>(animeJson)
+        val initialEpisodes = runCatching { parseJson<List<Episode>>(episodesJson) }.getOrDefault(emptyList())
         val totalEpisodes = videoPlayer.attr("episodes_count").toIntOrNull() ?: initialEpisodes.size
 
         return AnimePageData(
@@ -768,7 +908,11 @@ class AnimeUnity(
     }
 
     private suspend fun fetchAnimePageData(url: String): AnimePageData {
-        val animePage = app.get(url).document
+        val animePage = app.get(
+            url,
+            headers = getPageHeaders(),
+            interceptor = if (useCloudflareBypass) cfKiller else null
+        ).document
         return parseAnimePageData(animePage)
     }
 
@@ -784,9 +928,15 @@ class AnimeUnity(
         if (totalEpisodes > 120) {
             for (i in 2..range) {
                 val endRange = if (i == range) totalEpisodes else i * 120
-                val infoUrl = "$mainUrl/info_api/${anime.id}/1?start_range=${1 + (i - 1) * 120}&end_range=${endRange}"
-                val info = app.get(infoUrl).text
-                val animeInfo = parseJson<AnimeInfo>(info)
+                val infoUrl = "$mainUrl/info_api/${anime.id}/1?start_range=${1 + (i - 1) * 120}&end_range=$endRange"
+                val info = runCatching {
+                    app.get(
+                        infoUrl,
+                        headers = getPageHeaders(),
+                        interceptor = if (useCloudflareBypass) cfKiller else null
+                    ).text
+                }.getOrNull() ?: continue
+                val animeInfo = runCatching { parseJson<AnimeInfo>(info) }.getOrNull() ?: continue
                 episodes.addAll(animeInfo.episodes)
             }
         }
@@ -806,7 +956,7 @@ class AnimeUnity(
             .distinctBy(Anime::id)
     }
 
-    private suspend fun getAnilistPoster(anilistId: Int): String {
+    private suspend fun getAnilistPoster(anilistId: Int): String? {
         val query = """
         query (${'$'}id: Int) {
             Media(id: ${'$'}id, type: ANIME) {
@@ -816,15 +966,16 @@ class AnimeUnity(
                 }
             }
         }
-    """.trimIndent()
+        """.trimIndent()
 
         val body = mapOf("query" to query, "variables" to """{"id":$anilistId}""")
-        val response = app.post("https://graphql.anilist.co", data = body)
-        val anilistObj = parseJson<AnilistResponse>(response.text)
-
-        return anilistObj.data.media.coverImage?.let { coverImage ->
-            coverImage.large ?: coverImage.medium!!
-        } ?: throw IllegalStateException("No valid image found")
+        return runCatching {
+            val response = app.post("https://graphql.anilist.co", data = body)
+            val anilistObj = parseJson<AnilistResponse>(response.text)
+            anilistObj.data.media.coverImage?.let { coverImage ->
+                coverImage.large ?: coverImage.medium
+            }
+        }.getOrNull()
     }
 
     private suspend fun getTrailerUrl(anime: Anime): String? {
@@ -972,8 +1123,8 @@ class AnimeUnity(
             return getRandomMainPage(page, request.name, sectionData.baseUrl)
         }
 
-        val url = sectionData.baseUrl + "get-animes"
         ensureHeadersAndCookies()
+        val url = "$mainUrl/archivio/get-animes"
 
         val requestData = getDataPerHomeSection(sectionData.key)
         val sectionCount = getSectionCount(sectionData.key)
@@ -1001,8 +1152,14 @@ class AnimeUnity(
             )
         }
 
-        val latestEpisodesJson = app.get("$mainUrl/?page=1").document
-            .selectFirst("#ultimi-episodi layout-items")
+        ensureHeadersAndCookies()
+        val document = app.get(
+            "$mainUrl/?page=1",
+            headers = getPageHeaders(),
+            interceptor = if (useCloudflareBypass) cfKiller else null
+        ).document
+        val latestEpisodesJson = document
+            .selectFirst("#ultimi-episodi layout-items, layout-items[items-json]")
             ?.attr("items-json")
             .orEmpty()
 
@@ -1027,7 +1184,7 @@ class AnimeUnity(
     private suspend fun getCalendarMainPage(
         page: Int,
         sectionTitle: String,
-        requestUrl: String,
+        @Suppress("UNUSED_PARAMETER") requestUrl: String,
     ): HomePageResponse {
         val currentDay = getCurrentItalianDayName()
         val calendarTitle = "$sectionTitle ($currentDay)"
@@ -1040,7 +1197,12 @@ class AnimeUnity(
             )
         }
 
-        val calendarAnime = app.get(requestUrl).document
+        ensureHeadersAndCookies()
+        val calendarAnime = app.get(
+            "$mainUrl/calendario",
+            headers = getPageHeaders(),
+            interceptor = if (useCloudflareBypass) cfKiller else null
+        ).document
             .select("calendario-item")
             .mapNotNull { item ->
                 val animeJson = item.attr("a")
@@ -1087,10 +1249,10 @@ class AnimeUnity(
     private suspend fun getRandomMainPage(
         page: Int,
         sectionTitle: String,
-        requestUrl: String,
+        @Suppress("UNUSED_PARAMETER") requestUrl: String,
     ): HomePageResponse {
-        val url = "${requestUrl}get-animes"
         ensureHeadersAndCookies()
+        val url = "$mainUrl/archivio/get-animes"
 
         val sectionCount = getSectionCount("random")
         val (titles, total) = fetchRandomTitles(url, sectionCount)
@@ -1129,21 +1291,29 @@ class AnimeUnity(
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        ensureHeadersAndCookies()
         val url = "$mainUrl/archivio/get-animes"
-        ensureHeadersAndCookies(forceReset = true)
 
-        val requestBody = RequestData(title = query, dubbed = 0).toRequestBody()
-        val response = app.post(url, headers = headers, requestBody = requestBody)
-
-        val responseObject = parseJson<ApiResponse>(response.text)
+        val responseObject = fetchArchiveBatch(url, RequestData(title = query, dubbed = 0))
         val titles = responseObject.titles ?: emptyList()
 
         return searchResponseBuilder(titles)
     }
 
     override suspend fun load(url: String): LoadResponse {
-        ensureHeadersAndCookies(forceReset = true)
-        val animePage = app.get(url).document
+        ensureHeadersAndCookies()
+        val targetUrl = if (url.startsWith("http")) {
+            val path = url.toHttpUrl().encodedPath
+            "$mainUrl$path"
+        } else {
+            "$mainUrl/${url.trimStart('/')}"
+        }
+
+        val animePage = app.get(
+            targetUrl,
+            headers = getPageHeaders(),
+            interceptor = if (useCloudflareBypass) cfKiller else null
+        ).document
         val currentPageData = parseAnimePageData(animePage)
         val currentAnime = currentPageData.anime
         val shouldMergeVariants = shouldUseUnifiedDubSubCards()
@@ -1156,14 +1326,14 @@ class AnimeUnity(
             subAnime == null -> null
             subAnime.id == currentAnime.id -> currentPageData
             !shouldMergeVariants -> null
-            else -> fetchAnimePageData(getAnimeUrl(subAnime))
+            else -> runCatching { fetchAnimePageData(getAnimeUrl(subAnime)) }.getOrNull()
         }
 
         val dubPageData = when {
             dubAnime == null -> null
             dubAnime.id == currentAnime.id -> currentPageData
             !shouldMergeVariants -> null
-            else -> fetchAnimePageData(getAnimeUrl(dubAnime))
+            else -> runCatching { fetchAnimePageData(getAnimeUrl(dubAnime)) }.getOrNull()
         }
 
         val primaryAnime = subPageData?.anime ?: dubPageData?.anime ?: currentAnime
@@ -1179,7 +1349,7 @@ class AnimeUnity(
 
         val relatedAnimes = groupAnimeCards(filteredCorrelated)
             .sortedBy { it.anime.date.toIntOrNull() ?: Int.MAX_VALUE }
-            .map { entry ->
+            .amap { entry ->
                 val anime = entry.anime
                 val relatedTitle = getAnimeTitle(anime)
                 val poster = getImage(anime.imageUrl, anime.anilistId)
@@ -1280,8 +1450,11 @@ class AnimeUnity(
         if (imageUrl.isNotEmpty()) {
             try {
                 val fileName = imageUrl.substringAfterLast("/")
-                return "https://${getImageCdnHost()}/anime/$fileName"
-            } catch (_: Exception) {}
+                if (fileName.isNotBlank()) {
+                    return "https://${getImageCdnHost()}/anime/$fileName"
+                }
+            } catch (_: Exception) {
+            }
         }
         return imageUrl
     }
@@ -1292,16 +1465,29 @@ class AnimeUnity(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
+        ensureHeadersAndCookies()
         val playbackData = runCatching { parseJson<EpisodePlaybackData>(data) }.getOrNull()
         val playerSources = playbackData?.let(::buildPlayerSourceOptions)
             ?.takeIf { it.isNotEmpty() }
-            ?: listOf(PlayerSourceOption(label = "[SOURCE]", url = data))
+            ?: if (data.startsWith("http")) {
+                listOf(PlayerSourceOption(label = "[SOURCE]", url = data))
+            } else {
+                emptyList()
+            }
 
         val shouldLabelSources = playerSources.size > 1
 
         playerSources.forEach { playerSource ->
-            val document = app.get(playerSource.url).document
+            val document = runCatching {
+                app.get(
+                    playerSource.url,
+                    headers = getPageHeaders(),
+                    interceptor = if (useCloudflareBypass) cfKiller else null
+                ).document
+            }.getOrNull() ?: return@forEach
+
             val sourceUrl = document.select("video-player").attr("embed_url")
+                .ifBlank { document.selectFirst("iframe[src]")?.attr("src").orEmpty() }
             if (sourceUrl.isBlank()) return@forEach
 
             val sourceSuffix = if (shouldLabelSources) " ${playerSource.label}" else ""
@@ -1310,7 +1496,7 @@ class AnimeUnity(
                 displayName = "AnimeUnity$sourceSuffix",
             ).getUrl(
                 url = sourceUrl,
-                referer = mainUrl,
+                referer = "$mainUrl/",
                 subtitleCallback = subtitleCallback,
                 callback = callback
             )
