@@ -21,7 +21,7 @@ class VixCloudExtractor(
         "Accept" to "*/*",
         "Connection" to "keep-alive",
         "Cache-Control" to "no-cache",
-        "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
     )
 
     private companion object {
@@ -40,6 +40,10 @@ class VixCloudExtractor(
 
         Log.d(LOG_TAG, "FINAL URL: $playlistUrl")
 
+        val streamHeaders = headers.toMutableMap().apply {
+            put("Referer", url)
+        }
+
         callback(
             newExtractorLink(
                 source = sourceName,
@@ -47,7 +51,8 @@ class VixCloudExtractor(
                 url = playlistUrl,
                 type = ExtractorLinkType.M3U8
             ) {
-                this.headers = this@VixCloudExtractor.headers
+                this.referer = url
+                this.headers = streamHeaders
             }
         )
     }
@@ -55,44 +60,72 @@ class VixCloudExtractor(
     private suspend fun getPlaylistLink(url: String): String {
         Log.d(LOG_TAG, "Item url: $url")
 
-        val script = getScript(url)
-        val masterPlaylist = script.getJSONObject("masterPlaylist")
-        val masterPlaylistParams = masterPlaylist.getJSONObject("params")
-        val token = masterPlaylistParams.getString("token")
-        val expires = masterPlaylistParams.getString("expires")
-        val playlistUrl = masterPlaylist.getString("url")
+        val rawScript = getRawMasterPlaylistScript(url)
+        val parsed = runCatching {
+            val script = JSONObject(getSanitisedScript(rawScript))
+            val masterPlaylist = script.getJSONObject("masterPlaylist")
+            val masterPlaylistParams = masterPlaylist.getJSONObject("params")
+            val token = masterPlaylistParams.getString("token")
+            val expires = masterPlaylistParams.getString("expires")
+            val playlistUrl = masterPlaylist.getString("url")
+            val canPlayFHD = script.optBoolean("canPlayFHD", false)
+            buildFinalPlaylistUrl(playlistUrl, token, expires, canPlayFHD)
+        }.getOrElse {
+            extractPlaylistViaRegex(rawScript)
+        }
 
+        Log.d(LOG_TAG, "Master Playlist URL: $parsed")
+        return parsed
+    }
+
+    private fun buildFinalPlaylistUrl(
+        playlistUrl: String,
+        token: String,
+        expires: String,
+        canPlayFHD: Boolean,
+    ): String {
         val params = "token=$token&expires=$expires"
         val basePlaylistUrl = if ("?b" in playlistUrl) {
             "${playlistUrl.replace("?b:1", "?b=1")}&$params"
+        } else if ("?" in playlistUrl) {
+            "$playlistUrl&$params"
         } else {
-            "${playlistUrl}?$params"
+            "$playlistUrl?$params"
         }
-        val masterPlaylistUrl = if (script.getBoolean("canPlayFHD")) {
+        return if (canPlayFHD) {
             "$basePlaylistUrl&h=1"
         } else {
             basePlaylistUrl
         }
-
-        Log.d(LOG_TAG, "Master Playlist URL: $masterPlaylistUrl")
-        return masterPlaylistUrl
     }
 
-    private suspend fun getScript(url: String): JSONObject {
+    private fun extractPlaylistViaRegex(rawScript: String): String {
+        val token = Regex("""['"]token['"]\s*:\s*['"]([^'"]+)['"]""")
+            .find(rawScript)?.groupValues?.get(1)
+            ?: error("Missing VixCloud token")
+        val expires = Regex("""['"]expires['"]\s*:\s*['"]([^'"]+)['"]""")
+            .find(rawScript)?.groupValues?.get(1)
+            ?: error("Missing VixCloud expires")
+        val playlistUrl = Regex("""url\s*:\s*['"](https?://[^'"]+)['"]""")
+            .find(rawScript)?.groupValues?.get(1)
+            ?: error("Missing VixCloud playlist url")
+        val canPlayFHD = Regex("""window\.canPlayFHD\s*=\s*(true|1)""")
+            .containsMatchIn(rawScript)
+
+        return buildFinalPlaylistUrl(playlistUrl, token, expires, canPlayFHD)
+    }
+
+    private suspend fun getRawMasterPlaylistScript(url: String): String {
         Log.d(LOG_TAG, "Embed url: $url")
 
         val iframe = app.get(url, headers = headers, referer = this.referer).document
 
         val scripts = iframe.select("script")
-        val script = scripts
+        return scripts
             .firstOrNull { it.data().contains("masterPlaylist") }
             ?.data()
             ?.replace("\n", "\t")
             ?: error("Missing VixCloud masterPlaylist script")
-
-        val scriptJson = getSanitisedScript(script)
-        Log.d(LOG_TAG, "Script Json: $scriptJson")
-        return JSONObject(scriptJson)
     }
 
     private fun getSanitisedScript(script: String): String {
@@ -114,10 +147,7 @@ class VixCloudExtractor(
 
             "\"$key\": $cleaned"
         }
-        val finalObject =
-            "{\n${jsonObjects.joinToString(",\n")}\n}"
-                .replace("'", "\"")
-
-        return finalObject
+        return "{\n${jsonObjects.joinToString(",\n")}\n}"
+            .replace("'", "\"")
     }
 }
