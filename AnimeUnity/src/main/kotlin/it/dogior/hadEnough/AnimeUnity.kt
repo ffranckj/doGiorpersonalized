@@ -1,3 +1,4 @@
+// === FILE: AnimeUnity.kt ===
 package it.dogior.hadEnough
 
 import android.content.SharedPreferences
@@ -260,11 +261,11 @@ class AnimeUnity(
     }
 
     private fun getAnimeTitle(anime: Anime): String {
-        return anime.titleIt ?: anime.titleEng ?: anime.title!!
+        return anime.titleIt ?: anime.titleEng ?: anime.title ?: ""
     }
 
     private fun getAnimeTitle(anime: LatestEpisodeAnime): String {
-        return anime.titleIt ?: anime.titleEng ?: anime.title!!
+        return anime.titleIt ?: anime.titleEng ?: anime.title ?: ""
     }
 
     private fun isDubAnime(anime: Anime): Boolean {
@@ -641,7 +642,7 @@ class AnimeUnity(
             .distinct()
             .sortedWith(
                 compareBy<String>(
-                    { parseEpisodeSortValue(it) ?: Double.POSITIVE_INFINITY },
+                    { parseEpisodeSortValue(it) ?: Double.NEGATIVE_INFINITY },
                     { it }
                 )
             )
@@ -1027,7 +1028,7 @@ class AnimeUnity(
         "upcoming" -> RequestData(status = Str("In Uscita"), dubbed = 0)
         "best" -> RequestData(orderBy = Str("Valutazione"), dubbed = 0)
         "ongoing" -> RequestData(orderBy = Str("Popolarità"), status = Str("In Corso"), dubbed = 0)
-        else -> RequestData()
+        else -> RequestData(dubbed = 0)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -1208,13 +1209,14 @@ class AnimeUnity(
             }
     }
 
+    @Suppress("BlockingMethodInNonBlockingContext")
     private suspend fun modernGet(path: String): JSONObject {
         repeat(3) { attempt ->
             val response = app.get("$mainUrl/$path")
             if (response.code == 429 && attempt < 2) {
                 val retryAfter = response.headers["Retry-After"]?.toLongOrNull() ?: 60L
                 check(retryAfter in 1..120) { "AnimeUnity: troppe richieste; riprovare più tardi" }
-                kotlinx.coroutines.delay(retryAfter * 1000L)
+                Thread.sleep(retryAfter * 1000L)
             } else {
                 check(response.code == 200) { "AnimeUnity: HTTP ${response.code} per /${path.substringBefore('?')}" }
                 return JSONObject(response.text)
