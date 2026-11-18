@@ -1,240 +1,171 @@
 package it.dogior.hadEnough
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 
-// Sealed class to represent either Boolean or String
-sealed class BooleanOrString {
-    data class AsBoolean(val value: Boolean) : BooleanOrString(){
-        override fun toString(): String {
-            return value.toString()
-        }
-    }
-    data class AsString(val value: String) : BooleanOrString()
-
-    fun getValue(): Any {
-        return when (this) {
-            is AsBoolean -> this.value // Access boolean value
-            is AsString -> this.value  // Access string value
-        }
-    }
-}
-
-
-data class RequestData(
-    val title: String = "",
-    val type: BooleanOrString = BooleanOrString.AsBoolean(false),
-    val year: BooleanOrString = BooleanOrString.AsBoolean(false),
-    val orderBy: BooleanOrString = BooleanOrString.AsBoolean(false),
-    val status: BooleanOrString = BooleanOrString.AsBoolean(false),
-    val genres: Any = BooleanOrString.AsBoolean(false),
-    /*** Inverno, Primavera, Estate, Autunno ***/
-    val season: BooleanOrString = BooleanOrString.AsBoolean(false),
-    var offset: Int? = 0,
-    val dubbed: Int = 1,
-){
-    private fun serializeValue(value: Any): Any {
-        return when (value) {
-            is BooleanOrString -> value.getValue()
-            is List<*> -> JSONArray().apply {
-                value.filterIsInstance<ArchiveGenreOption>().forEach { genre ->
-                    put(
-                        JSONObject().apply {
-                            put("id", genre.id)
-                            put("name", genre.name)
-                        }
-                    )
-                }
-            }
-            else -> value
-        }
-    }
-
-    private fun toJson(): JSONObject {
-        val m = mapOf(
-            "title" to title,
-            "type" to serializeValue(type),
-            "year" to serializeValue(year),
-            "order" to serializeValue(orderBy),
-            "status" to serializeValue(status),
-            "genres" to serializeValue(genres),
-            "season" to serializeValue(season),
-            "dubbed" to dubbed,
-            "offset" to offset
-        )
-
-        return JSONObject().apply {
-            m.forEach { (key, value) ->
-                put(key, value)
-            }
-        }
-    }
-
-    fun toRequestBody(): RequestBody {
-        return this.toJson().toString()
-            .toRequestBody("application/json;charset=utf-8".toMediaType())
-    }
-}
-
-
-data class ApiResponse(
-    @JsonProperty("records") val titles: List<Anime>?,
-    @JsonProperty("tot") val total: Int
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class InertiaPage(
+    @JsonProperty("component") val component: String? = null,
+    @JsonProperty("props") val props: InertiaProps? = null,
+    @JsonProperty("url") val url: String? = null,
+    @JsonProperty("version") val version: String? = null
 )
 
-data class Anime(
-    @JsonProperty("id") val id: Int,
-//    @JsonProperty("user_id") val userId: Int,
-    @JsonProperty("title") val title: String?,
-    @JsonProperty("imageurl") val imageUrl: String,
-    @JsonProperty("plot") val plot: String,
-    @JsonProperty("date") val date: String,
-    @JsonProperty("episodes_count") val episodesCount: Int,
-    @JsonProperty("episodes_length") val episodesLength: Int,
-    @JsonProperty("status") val status: String,
-//    @JsonProperty("imageurl_cover") val imageUrlCover: String?,
-    @JsonProperty("type") val type: String,
-    @JsonProperty("slug") val slug: String,
-    @JsonProperty("title_eng") val titleEng: String?,
-    @JsonProperty("day") val day: String?,
-    @JsonProperty("score") val score: String?,
-//    @JsonProperty("studio") val studio: String,
-    @JsonProperty("dub") val dub: Int,
-//    @JsonProperty("always_home") val alwaysHome: Int,
-    @JsonProperty("cover") val cover: String?,
-    @JsonProperty("anilist_id") val anilistId: Int?,
-//    @JsonProperty("season") val season: String,
-    @JsonProperty("title_it") val titleIt: String?,
-    @JsonProperty("mal_id") val malId: Int?,
-    @JsonProperty("episodes") val episodes: List<Episode>?,
-    @JsonProperty("genres") val genres: List<Genre>
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class InertiaProps(
+    @JsonProperty("carouselAnimes") val carouselAnimes: List<Anime>? = null,
+    @JsonProperty("latestAnimes") val latestAnimes: List<Anime>? = null,
+    @JsonProperty("upcomingAnimes") val upcomingAnimes: List<Anime>? = null,
+    @JsonProperty("latestEpisodes") val latestEpisodes: LatestEpisodesPage? = null,
+    @JsonProperty("topAnimes") val topAnimes: TopAnimesGroup? = null,
+    @JsonProperty("animes") val animes: ApiResponse<Anime>? = null,
+    @JsonProperty("entries") val entries: Map<String, List<CalendarEntry>>? = null,
+    @JsonProperty("calendarEntries") val calendarEntries: Map<String, List<CalendarEntry>>? = null,
+    @JsonProperty("anime") val anime: Anime? = null,
+    @JsonProperty("episode") val episode: Episode? = null,
+    @JsonProperty("video") val video: VideoItem? = null,
+    @JsonProperty("loadedEpisodes") val loadedEpisodes: LoadedEpisodes? = null,
+    @JsonProperty("relatedAnimes") val relatedAnimes: List<Anime>? = null,
+    @JsonProperty("recommendedAnimes") val recommendedAnimes: List<Anime>? = null,
+    @JsonProperty("embedUrl") val embedUrl: String? = null,
+    @JsonProperty("scws_url") val scwsUrl: String? = null
 )
 
-data class Episode(
-    @JsonProperty("id") val id: Int,
-    @JsonProperty("anime_id") val animeId: Int,
-    @JsonProperty("user_id") val userId: Int?,
-    @JsonProperty("number") val number: String,
-    @JsonProperty("link") val link: String,
-    @JsonProperty("visite") val visite: Int,
-    @JsonProperty("hidden") val hidden: Int,
-    @JsonProperty("public") val isPublic: Int,
-    @JsonProperty("scws_id") val scwsId: Int,
-    @JsonProperty("file_name") val fileName: String?
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class TopAnimesGroup(
+    @JsonProperty("day") val day: List<Anime>? = null,
+    @JsonProperty("week") val week: List<Anime>? = null,
+    @JsonProperty("month") val month: List<Anime>? = null
 )
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ApiResponse<T>(
+    @JsonProperty("current_page") val currentPage: Int? = null,
+    @JsonProperty("data") val data: List<T>? = emptyList(),
+    @JsonProperty("last_page") val lastPage: Int? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class LatestEpisodesPage(
-    @JsonProperty("current_page") val currentPage: Int,
-    @JsonProperty("data") val episodes: List<LatestEpisodeItem>
+    @JsonProperty("current_page") val currentPage: Int? = null,
+    @JsonProperty("data") val data: List<LatestEpisodeItem>? = emptyList(),
+    @JsonProperty("last_page") val lastPage: Int? = null
 )
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class LatestEpisodeItem(
-    @JsonProperty("id") val id: Int,
-    @JsonProperty("anime_id") val animeId: Int,
-    @JsonProperty("user_id") val userId: Int?,
-    @JsonProperty("number") val number: String,
-    @JsonProperty("anime") val anime: LatestEpisodeAnime
+    @JsonProperty("id") val id: Int? = null,
+    @JsonProperty("language") val language: String? = null,
+    @JsonProperty("runtime") val runtime: Int? = null,
+    @JsonProperty("scws_id") val scwsId: Int? = null,
+    @JsonProperty("episode") val episode: LatestEpisodeInfo? = null
 )
 
-data class LatestEpisodeAnime(
-    @JsonProperty("id") val id: Int,
-    @JsonProperty("title") val title: String?,
-    @JsonProperty("imageurl") val imageUrl: String?,
-    @JsonProperty("episodes_count") val episodesCount: Int,
-    @JsonProperty("type") val type: String,
-    @JsonProperty("slug") val slug: String,
-    @JsonProperty("title_eng") val titleEng: String?,
-    @JsonProperty("score") val score: String?,
-    @JsonProperty("dub") val dub: Int,
-    @JsonProperty("cover") val cover: String?,
-    @JsonProperty("anilist_id") val anilistId: Int?,
-    @JsonProperty("title_it") val titleIt: String?
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class LatestEpisodeInfo(
+    @JsonProperty("id") val id: Int? = null,
+    @JsonProperty("number") val number: String? = null,
+    @JsonProperty("anime") val anime: Anime? = null
 )
 
-data class AnimeInfo(
-    @JsonProperty("id") val id: Int,
-    @JsonProperty("name") val name: String?,
-//    @JsonProperty("slug") val slug: String,
-    @JsonProperty("episodes_count") val episodesCount: Int,
-    @JsonProperty("current_episode") val currentEpisode: Int,
-    @JsonProperty("episodes") val episodes: List<Episode>
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class CalendarEntry(
+    @JsonProperty("anime") val anime: Anime? = null,
+    @JsonProperty("isDub") val isDub: Boolean? = null,
+    @JsonProperty("nextEpisodeNumber") val nextEpisodeNumber: String? = null,
+    @JsonProperty("releaseTime") val releaseTime: String? = null
 )
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class Anime(
+    @JsonProperty("id") val id: Int = 0,
+    @JsonProperty("slug") val slug: String? = null,
+    @JsonProperty("title") val title: String? = null,
+    @JsonProperty("title_ja") val titleJa: String? = null,
+    @JsonProperty("title_it") val titleIt: String? = null,
+    @JsonProperty("title_eng") val titleEng: String? = null,
+    @JsonProperty("type") val type: String? = null,
+    @JsonProperty("season") val season: String? = null,
+    @JsonProperty("year") val year: Int? = null,
+    @JsonProperty("total_episodes") val totalEpisodes: Int? = null,
+    @JsonProperty("episode_runtime") val episodeRuntime: Int? = null,
+    @JsonProperty("default_status") val defaultStatus: String? = null,
+    @JsonProperty("status") val status: String? = null,
+    @JsonProperty("plot") val plot: String? = null,
+    @JsonProperty("is_adult") val isAdult: Boolean? = null,
+    @JsonProperty("images") val images: AnimeImages? = null,
+    @JsonProperty("imageurl") val imageUrl: String? = null,
+    @JsonProperty("cover") val cover: String? = null,
+    @JsonProperty("variants") val variants: List<AnimeVariant>? = emptyList(),
+    @JsonProperty("genres") val genres: List<Genre>? = emptyList(),
+    @JsonProperty("studios") val studios: List<Studio>? = emptyList()
+) {
+    val bestPoster: String?
+        get() = images?.poster?.takeIf { it.isNotBlank() }
+            ?: images?.cover?.takeIf { it.isNotBlank() }
+            ?: imageUrl?.takeIf { it.isNotBlank() }
+
+    val bestBanner: String?
+        get() = images?.banner?.takeIf { it.isNotBlank() }
+            ?: images?.cover?.takeIf { it.isNotBlank() }
+            ?: cover?.takeIf { it.isNotBlank() }
+            ?: bestPoster
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AnimeImages(
+    @JsonProperty("banner") val banner: String? = null,
+    @JsonProperty("cover") val cover: String? = null,
+    @JsonProperty("poster") val poster: String? = null,
+    @JsonProperty("logo") val logo: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AnimeVariant(
+    @JsonProperty("language") val language: String? = null,
+    @JsonProperty("status") val status: String? = null,
+    @JsonProperty("airing_day") val airingDay: String? = null,
+    @JsonProperty("episodes_count") val episodesCount: Int? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class Genre(
-    @JsonProperty("id") val id: Int,
-    @JsonProperty("name") val name: String
+    @JsonProperty("id") val id: Int? = null,
+    @JsonProperty("name") val name: String? = null
 )
 
-data class ArchiveGenreOption(
-    val id: Int,
-    val name: String,
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class Studio(
+    @JsonProperty("id") val id: Int? = null,
+    @JsonProperty("name") val name: String? = null
 )
 
-data class AdvancedSearchConfig(
-    val enabled: Boolean,
-    val title: String,
-    val genre: ArchiveGenreOption?,
-    val year: String?,
-    val order: String?,
-    val status: String?,
-    val type: String?,
-    val season: String?,
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class LoadedEpisodes(
+    @JsonProperty("episodes") val episodes: List<Episode>? = emptyList(),
+    @JsonProperty("start") val start: Int? = null,
+    @JsonProperty("tab_size") val tabSize: Int? = null,
+    @JsonProperty("total") val total: Int? = null,
+    @JsonProperty("offset") val offset: Int? = null
 )
 
-data class AnilistResponse(
-    @JsonProperty("data") val data: AnilistData
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class Episode(
+    @JsonProperty("id") val id: Int = 0,
+    @JsonProperty("number") val number: String? = null,
+    @JsonProperty("seq_number_start") val seqNumberStart: Int? = null,
+    @JsonProperty("seq_number_end") val seqNumberEnd: Int? = null,
+    @JsonProperty("is_filler") val isFiller: Boolean? = null,
+    @JsonProperty("scws_id") val scwsId: Int? = null,
+    @JsonProperty("link") val link: String? = null,
+    @JsonProperty("videos") val videos: List<VideoItem>? = emptyList()
 )
 
-data class AnilistData(
-    @JsonProperty("Media") val media: AnilistMedia
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class VideoItem(
+    @JsonProperty("id") val id: Int = 0,
+    @JsonProperty("language") val language: String? = null,
+    @JsonProperty("runtime") val runtime: Int? = null,
+    @JsonProperty("scws_id") val scwsId: Int? = null,
+    @JsonProperty("embed_url") val embedUrl: String? = null
 )
-
-data class AnilistMedia(
-    @JsonProperty("id") val id: Int,
-    @JsonProperty("coverImage") val coverImage: AnilistCoverImage?,
-    @JsonProperty("duration") val duration: Int?,
-    @JsonProperty("trailer") val trailer: AnilistTrailer?
-)
-
-data class AnilistCoverImage(
-    @JsonProperty("medium") val medium: String?,
-    @JsonProperty("large") val large: String?,
-    @JsonProperty("extraLarge") val extraLarge: String?
-)
-
-data class AnilistTrailer(
-    @JsonProperty("id") val id: String?,
-    @JsonProperty("site") val site: String?,
-    @JsonProperty("thumbnail") val thumbnail: String?
-)
-
-data class JikanFullResponse(
-    @JsonProperty("data") val data: JikanAnimeData
-)
-
-data class JikanAnimeData(
-    @JsonProperty("trailer") val trailer: JikanTrailer?
-)
-
-data class JikanSearchResponse(
-    @JsonProperty("data") val data: List<JikanSearchAnime>
-)
-
-data class JikanSearchAnime(
-    @JsonProperty("title") val title: String,
-    @JsonProperty("title_english") val titleEnglish: String?,
-    @JsonProperty("title_japanese") val titleJapanese: String?,
-    @JsonProperty("title_synonyms") val titleSynonyms: List<String>?,
-    @JsonProperty("trailer") val trailer: JikanTrailer?
-)
-
-data class JikanTrailer(
-    @JsonProperty("youtube_id") val youtubeId: String?,
-    @JsonProperty("url") val url: String?,
-    @JsonProperty("embed_url") val embedUrl: String?
-)
-
