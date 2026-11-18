@@ -1,3 +1,4 @@
+// === FILE: AnimeUnityPlugin.kt ===
 package it.dogior.hadEnough
 
 import android.content.Context
@@ -44,7 +45,6 @@ class AnimeUnityPlugin : Plugin() {
         const val PREF_UNIFY_DUB_SUB_CARDS = "unifyDubSubCards"
         const val PREF_SHOW_DUB_SUB = "showDubSub"
         const val PREF_SHOW_EPISODE_NUMBER = "showEpisodeNumber"
-        const val PREF_SHOW_SCORE = "showScore"
         const val PREF_SECTION_ORDER = "sectionOrder"
         const val PREF_ENABLE_ADVANCED_SEARCH = "enableAdvancedSearch"
         const val PREF_ADVANCED_SEARCH_TITLE = "advancedSearchTitle"
@@ -314,12 +314,12 @@ class AnimeUnityPlugin : Plugin() {
 
             return RequestData(
                 title = config.title,
-                type = config.type?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                year = config.year?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                orderBy = config.order?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                status = config.status?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                genres = config.genre?.let { listOf(it) } ?: BooleanOrString.AsBoolean(false),
-                season = config.season?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
+                type = if (config.type != null) BooleanOrString.AsString(config.type) else BooleanOrString.AsBoolean(false),
+                year = if (config.year != null) BooleanOrString.AsString(config.year) else BooleanOrString.AsBoolean(false),
+                orderBy = if (config.order != null) BooleanOrString.AsString(config.order) else BooleanOrString.AsBoolean(false),
+                status = if (config.status != null) BooleanOrString.AsString(config.status) else BooleanOrString.AsBoolean(false),
+                genres = if (config.genre != null) listOf(config.genre) else BooleanOrString.AsBoolean(false),
+                season = if (config.season != null) BooleanOrString.AsString(config.season) else BooleanOrString.AsBoolean(false),
                 dubbed = 0,
             )
         }
