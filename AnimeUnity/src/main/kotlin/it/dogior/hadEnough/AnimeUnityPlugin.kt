@@ -1,8 +1,8 @@
+// === FILE: AnimeUnityPlugin.kt ===
 package it.dogior.hadEnough
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.appcompat.app.AppCompatActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import java.util.Calendar
@@ -13,7 +13,7 @@ class AnimeUnityPlugin : Plugin() {
     companion object {
         const val PREFS_NAME = "AnimeUnity"
         const val PREF_SITE_URL = "siteUrl"
-        
+
         // Sezioni abilitate
         const val PREF_SHOW_LATEST_EPISODES = "showLatestEpisodes"
         const val PREF_SHOW_CALENDAR = "showCalendar"
@@ -22,7 +22,7 @@ class AnimeUnityPlugin : Plugin() {
         const val PREF_SHOW_POPULAR = "showPopular"
         const val PREF_SHOW_BEST = "showBest"
         const val PREF_SHOW_UPCOMING = "showUpcoming"
-        
+
         // Count per sezione
         const val PREF_LATEST_COUNT = "latestCount"
         const val PREF_CALENDAR_COUNT = "calendarCount"
@@ -45,7 +45,6 @@ class AnimeUnityPlugin : Plugin() {
         const val PREF_UNIFY_DUB_SUB_CARDS = "unifyDubSubCards"
         const val PREF_SHOW_DUB_SUB = "showDubSub"
         const val PREF_SHOW_EPISODE_NUMBER = "showEpisodeNumber"
-        const val PREF_SHOW_SCORE = "showScore"
         const val PREF_SECTION_ORDER = "sectionOrder"
         const val PREF_ENABLE_ADVANCED_SEARCH = "enableAdvancedSearch"
         const val PREF_ADVANCED_SEARCH_TITLE = "advancedSearchTitle"
@@ -139,7 +138,7 @@ class AnimeUnityPlugin : Plugin() {
         private val advancedSearchOrderOptions = listOf(
             "Lista A-Z",
             "Lista Z-A",
-            "Popolarit\u00E0",
+            "Popolarità",
             "Valutazione",
         )
         private val advancedSearchStatusOptions = listOf(
@@ -315,12 +314,12 @@ class AnimeUnityPlugin : Plugin() {
 
             return RequestData(
                 title = config.title,
-                type = config.type?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                year = config.year?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                orderBy = config.order?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                status = config.status?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
-                genres = config.genre?.let { listOf(it) } ?: BooleanOrString.AsBoolean(false),
-                season = config.season?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
+                type = if (config.type != null) BooleanOrString.AsString(config.type) else BooleanOrString.AsBoolean(false),
+                year = if (config.year != null) BooleanOrString.AsString(config.year) else BooleanOrString.AsBoolean(false),
+                orderBy = if (config.order != null) BooleanOrString.AsString(config.order) else BooleanOrString.AsBoolean(false),
+                status = if (config.status != null) BooleanOrString.AsString(config.status) else BooleanOrString.AsBoolean(false),
+                genres = if (config.genre != null) listOf(config.genre) else BooleanOrString.AsBoolean(false),
+                season = if (config.season != null) BooleanOrString.AsString(config.season) else BooleanOrString.AsBoolean(false),
                 dubbed = 0,
             )
         }
@@ -353,12 +352,5 @@ class AnimeUnityPlugin : Plugin() {
         activeSharedPref = sharedPref
 
         registerMainAPI(AnimeUnity(sharedPref))
-
-        openSettings = { ctx ->
-            val activity = ctx as AppCompatActivity
-            activePlugin = this
-            activeSharedPref = sharedPref
-            AnimeUnitySettings().show(activity.supportFragmentManager, "AnimeUnitySettings")
-        }
     }
 }
