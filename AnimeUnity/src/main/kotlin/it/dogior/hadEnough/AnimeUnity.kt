@@ -268,8 +268,8 @@ class AnimeUnity(
         return AnimeUnityPlugin.shouldUseUnifiedDubSubCards(sharedPref)
     }
 
-    private fun withoutDubSuffix(title: String): String {
-        return title.replace(" (ITA)", "").replace(" (ita)", "")
+    private fun withoutDubSuffix(title: String?): String {
+        return title.orEmpty().replace(" (ITA)", "").replace(" (ita)", "")
     }
 
     private fun getAnimeTitle(anime: Anime): String {
@@ -287,7 +287,7 @@ class AnimeUnity(
     private fun isDubAnime(anime: Anime): Boolean {
         return anime.dub == 1 ||
             getAnimeTitle(anime).contains("(ITA)", ignoreCase = true) ||
-            anime.slug.endsWith("-ita", ignoreCase = true)
+            anime.slug?.endsWith("-ita", ignoreCase = true) == true
     }
 
     private fun isDubAnime(anime: LatestEpisodeAnime): Boolean {
@@ -318,7 +318,7 @@ class AnimeUnity(
         return when {
             primaryIsDub && !candidateIsDub -> candidate
             !primaryIsDub && candidateIsDub -> primary
-            candidate.episodesCount > primary.episodesCount -> candidate
+            candidate.finalEpisodesCount > primary.finalEpisodesCount -> candidate
             else -> primary
         }
     }
@@ -362,28 +362,29 @@ class AnimeUnity(
         if (!shouldUseUnifiedDubSubCards()) {
             return items.map { item ->
                 GroupedLatestEpisodeCard(
-                    anime = item.anime,
-                    hasDub = isDubAnime(item.anime),
-                    episodeNumber = item.number,
+                    anime = item.animeNode ?: return@map null,
+                    hasDub = isDubAnime(item.animeNode),
+                    episodeNumber = item.number ?: item.episodeNode?.number ?: "1",
                 )
-            }
+            }.filterNotNull()
         }
 
         return items
-            .groupBy { it.anime.contentKey() }
+            .mapNotNull { if (it.animeNode == null) null else it }
+            .groupBy { it.animeNode!!.contentKey() }
             .values
             .map { variants ->
                 val latestEpisode = variants.maxWithOrNull(
                     compareBy<LatestEpisodeItem>(
-                        { parseEpisodeSortValue(it.number) ?: Double.NEGATIVE_INFINITY },
-                        { it.number }
+                        { parseEpisodeSortValue(it.number ?: it.episodeNode?.number) ?: Double.NEGATIVE_INFINITY },
+                        { it.number ?: it.episodeNode?.number ?: "1" }
                     )
                 ) ?: variants.first()
 
                 GroupedLatestEpisodeCard(
-                    anime = variants.map { it.anime }.reduce { primary, candidate -> preferAnime(primary, candidate) },
-                    hasDub = variants.any { isDubAnime(it.anime) },
-                    episodeNumber = latestEpisode.number,
+                    anime = variants.map { it.animeNode!! }.reduce { primary, candidate -> preferAnime(primary, candidate) },
+                    hasDub = variants.any { isDubAnime(it.animeNode!!) },
+                    episodeNumber = latestEpisode.number ?: latestEpisode.episodeNode?.number ?: "1",
                 )
             }
     }
@@ -471,7 +472,6 @@ class AnimeUnity(
         val configuredBase = AnimeUnityPlugin.getConfiguredBaseUrl(sharedPref)
         val initialBase = resolvedBaseUrl ?: configuredBase
         
-        Log.d(LOG_TAG, "Tentativo di connessione a $initialBase")
         val response = runCatching {
             app.get(
                 "$initialBase/",
@@ -504,8 +504,6 @@ class AnimeUnity(
                 .entries
                 .joinToString("; ") { "${it.key}=${it.value}" }
 
-            Log.d(LOG_TAG, "Session setup riuscito -> url=${response.url} code=${response.code}")
-
             val newHeaders = mutableMapOf(
                 "User-Agent" to USER_AGENT,
                 "X-Requested-With" to "XMLHttpRequest",
@@ -519,7 +517,6 @@ class AnimeUnity(
 
             headers = newHeaders
         } else {
-            Log.e(LOG_TAG, "Nessuna risposta da $initialBase. Utilizzo header di base.")
             resolvedBaseUrl = initialBase
         }
     }
@@ -592,7 +589,7 @@ class AnimeUnity(
             }
         }
 
-        val defaultKeys = listOf("data", "records", "episodes", "animes", "titles", "items", "results", "list", "calendar", "topAnimes", "latestEpisodes")
+        val defaultKeys = listOf("data", "records", "episodes", "animes", "titles", "items", "results", "list", "calendar", "topAnimes", "latestEpisodes", "month", "week", "day")
         for (key in defaultKeys) {
             val child = node.get(key) ?: continue
             if (child.isArray) return child
@@ -618,138 +615,7 @@ class AnimeUnity(
     }
 
     private fun parseAnimeFromNode(node: JsonNode): Anime? {
-        val target = if (node.has("anime") && node.get("anime").isObject) node.get("anime") else node
-        val id = target.asIntOrNull("id", "anime_id", "animeId") ?: return null
-        val slug = target.asTextOrNull("slug") ?: ""
-        val title = target.asTextOrNull("title", "name", "title_eng", "title_it")
-        val titleEng = target.asTextOrNull("title_eng", "titleEng", "english_title")
-        val titleIt = target.asTextOrNull("title_it", "titleIt", "italian_title")
-
-        if (title.isNullOrBlank() && titleEng.isNullOrBlank() && titleIt.isNullOrBlank()) return null
-
-        val imageUrl = target.asTextOrNull(
-            "imageurl",
-            "image_url",
-            "imageUrl",
-            "poster",
-            "poster_url",
-            "cover_image",
-            "image",
-            "thumb"
-        )
-        val coverUrl = target.asTextOrNull(
-            "cover",
-            "banner",
-            "banner_url",
-            "imageurl_cover",
-            "cover_url"
-        )
-        val date = target.asTextOrNull("date", "year", "release_year", "season_year").orEmpty()
-        val status = target.asTextOrNull("status", "state").orEmpty()
-        val type = target.asTextOrNull("type", "format", "media_type") ?: "TV"
-        val dub = target.asBoolInt("dub", "is_dub", "dubbed", "has_dub")
-        val episodesCount = target.asIntOrNull("episodes_count", "episodesCount", "total_episodes") ?: 0
-        val episodesLength = target.asIntOrNull("episodes_length", "episodesLength", "duration") ?: 24
-        val anilistId = target.asIntOrNull("anilist_id", "anilistId")
-        val malId = target.asIntOrNull("mal_id", "malId")
-        val day = target.asTextOrNull("day", "broadcast_day", "release_day") ?: node.asTextOrNull("day")
-
-        val genresList = mutableListOf<Genre>()
-        val genresNode = target.get("genres")
-        if (genresNode != null && genresNode.isArray) {
-            genresNode.forEachIndexed { idx, g ->
-                if (g.isObject) {
-                    val gName = g.asTextOrNull("name", "title")
-                    if (!gName.isNullOrBlank()) {
-                        genresList.add(Genre(id = g.asIntOrNull("id") ?: idx, name = gName))
-                    }
-                } else if (g.isTextual) {
-                    genresList.add(Genre(id = idx, name = g.asText()))
-                }
-            }
-        }
-
-        val episodesList = mutableListOf<Episode>()
-        val episodesNode = target.get("episodes") ?: target.get("videos")
-        if (episodesNode != null && episodesNode.isArray) {
-            episodesNode.forEach { epNode ->
-                parseEpisodeFromNode(epNode, id)?.let(episodesList::add)
-            }
-        }
-
-        return Anime(
-            id = id,
-            title = title ?: titleEng ?: titleIt,
-            imageUrl = imageUrl,
-            date = date,
-            episodesCount = episodesCount,
-            episodesLength = episodesLength,
-            status = status,
-            type = type,
-            slug = slug,
-            titleEng = titleEng,
-            day = day,
-            dub = dub,
-            cover = coverUrl,
-            anilistId = anilistId,
-            titleIt = titleIt,
-            malId = malId,
-            episodes = episodesList,
-            genres = genresList
-        )
-    }
-
-    private fun parseEpisodeFromNode(node: JsonNode, fallbackAnimeId: Int = 0): Episode? {
-        val id = node.asIntOrNull("id", "video_id", "episode_id") ?: return null
-        val number = node.asTextOrNull("number", "episode_number", "ep", "num") ?: "1"
-        val link = node.asTextOrNull("link", "embed_url", "embedUrl", "url", "scws_url")
-        val scwsId = node.asIntOrNull("scws_id", "scwsId")
-
-        return Episode(
-            id = id,
-            animeId = node.asIntOrNull("anime_id", "animeId") ?: fallbackAnimeId,
-            userId = null,
-            number = number,
-            link = link,
-            visite = 0,
-            hidden = 0,
-            isPublic = 1,
-            scwsId = scwsId,
-            fileName = node.asTextOrNull("file_name", "fileName")
-        )
-    }
-
-    private fun parseLatestEpisodeItemFromNode(node: JsonNode): LatestEpisodeItem? {
-        val animeNode = if (node.has("anime") && node.get("anime").isObject) {
-            node.get("anime")
-        } else {
-            node
-        }
-        val anime = parseAnimeFromNode(animeNode) ?: return null
-        val epId = node.asIntOrNull("id", "episode_id", "video_id") ?: anime.id
-        val epNumber = node.asTextOrNull("number", "episode_number", "ep", "latest_episode")
-            ?: anime.episodes?.lastOrNull()?.number
-            ?: (if (anime.episodesCount > 0) anime.episodesCount.toString() else "1")
-
-        return LatestEpisodeItem(
-            id = epId,
-            animeId = anime.id,
-            userId = null,
-            number = epNumber.removePrefix("EP ").removePrefix("Ep ").trim(),
-            anime = LatestEpisodeAnime(
-                id = anime.id,
-                title = anime.title,
-                imageUrl = anime.imageUrl,
-                episodesCount = anime.episodesCount,
-                type = anime.type,
-                slug = anime.slug,
-                titleEng = anime.titleEng,
-                dub = anime.dub,
-                cover = anime.cover,
-                anilistId = anime.anilistId,
-                titleIt = anime.titleIt
-            )
-        )
+        return runCatching { parseJson<Anime>(node.toString()) }.getOrNull()
     }
 
     private fun parseAnimesFromHtmlDom(doc: Document): List<Anime> {
@@ -950,8 +816,11 @@ class AnimeUnity(
         return groupAnimeCards(objectList).amap { entry ->
             val anime = entry.anime
             val title = getAnimeTitle(anime)
-            val poster = getImage(anime.imageUrl, anime.anilistId)
-
+            
+            // Extract single valid image URL logic based on DTO
+            val rawImg = anime.imageUrl?.takeIf { it.isNotBlank() } ?: anime.cover?.takeIf { it.isNotBlank() }
+            val poster = if (rawImg != null) getImage(rawImg, null) else getImage(null, anime.anilistId)
+            
             newAnimeSearchResponse(
                 name = buildDisplayTitle(title, episodeNumber),
                 url = "$mainUrl/anime/${anime.id}-${anime.slug}",
@@ -959,7 +828,7 @@ class AnimeUnity(
                     anime.type.equals("TV", ignoreCase = true) -> TvType.Anime
                     anime.type.equals("Movie", ignoreCase = true) ||
                         anime.type.equals("Film", ignoreCase = true) ||
-                        anime.episodesCount == 1 -> TvType.AnimeMovie
+                        anime.finalEpisodesCount == 1 -> TvType.AnimeMovie
                     else -> TvType.OVA
                 }
             ).apply {
@@ -1029,7 +898,7 @@ class AnimeUnity(
 
         val apiResp = runCatching { app.get(fullApiUrl, headers = getApiHeaders()) }.getOrNull()
         val apiText = apiResp?.text?.trim().orEmpty()
-        Log.d(LOG_TAG, "GET $fullApiUrl -> code=${apiResp?.code}")
+        Log.e(LOG_TAG, "GET $fullApiUrl -> code=${apiResp?.code} body=${apiText.take(100)}")
 
         if (apiText.startsWith("{") || apiText.startsWith("[")) {
             val rootNode = runCatching { parseJson<JsonNode>(apiText) }.getOrNull()
@@ -1050,6 +919,7 @@ class AnimeUnity(
 
         val pageResp = runCatching { app.get(fullPageUrl, headers = getPageHeaders()) }.getOrNull()
         val doc = pageResp?.document
+        Log.e(LOG_TAG, "GET Page $fullPageUrl -> code=${pageResp?.code} title=${doc?.title()}")
 
         if (doc != null) {
             val props = extractInertiaProps(doc)
@@ -1107,7 +977,7 @@ class AnimeUnity(
             else -> Triple("/api/archive", "/archive", mapOf("page" to page.toString()))
         }
 
-        val (titles, diag) = fetchAnimesFromApiOrInertia(apiPath, pagePath, params)
+        val (titles, diag) = fetchAnimesFromApiOrInertia(apiPath, pagePath, params, arrayOf("day", "week", "month"))
         val cards = if (titles.isNotEmpty()) {
             searchResponseBuilder(titles.take(sectionCount))
         } else if (page == 1) {
@@ -1131,12 +1001,17 @@ class AnimeUnity(
         val apiUrl = "$mainUrl/api/home/latest-episodes?page=$page"
         val apiResp = runCatching { app.get(apiUrl, headers = getApiHeaders()) }.getOrNull()
         val apiText = apiResp?.text?.trim().orEmpty()
+        Log.e(LOG_TAG, "GET $apiUrl -> code=${apiResp?.code} body=${apiText.take(150)}")
 
         if (apiText.startsWith("{") || apiText.startsWith("[")) {
             val root = runCatching { parseJson<JsonNode>(apiText) }.getOrNull()
             val arr = findFirstArrayNode(root, "episodes", "latestEpisodes", "data", "items")
             if (arr != null) {
-                items.addAll(arr.mapNotNull(::parseLatestEpisodeItemFromNode))
+                items.addAll(
+                    arr.mapNotNull { node ->
+                        runCatching { parseJson<LatestEpisodeItem>(node.toString()) }.getOrNull()
+                    }
+                )
             }
         }
 
@@ -1148,25 +1023,23 @@ class AnimeUnity(
                 if (props != null) {
                     val arr = findFirstArrayNode(props, "latestEpisodes", "latest_episodes", "episodes", "data")
                     if (arr != null) {
-                        items.addAll(arr.mapNotNull(::parseLatestEpisodeItemFromNode))
+                        items.addAll(
+                            arr.mapNotNull { node ->
+                                runCatching { parseJson<LatestEpisodeItem>(node.toString()) }.getOrNull()
+                            }
+                        )
                     }
                 }
-                if (items.isEmpty()) {
-                    val legacyJson = doc.selectFirst("#ultimi-episodi layout-items")?.attr("items-json").orEmpty()
-                    if (legacyJson.isNotBlank()) {
-                        val legacyItems = runCatching { parseJson<LatestEpisodesPage>(legacyJson).episodes }.getOrDefault(emptyList())
-                        items.addAll(legacyItems)
-                    }
-                }
+                
                 if (items.isEmpty()) {
                     val domAnimes = parseAnimesFromHtmlDom(doc)
                     items.addAll(
                         domAnimes.map { a ->
                             LatestEpisodeItem(
                                 id = a.id, animeId = a.id, userId = null, number = "1",
-                                anime = LatestEpisodeAnime(
-                                    id = a.id, title = a.title, imageUrl = a.imageUrl, episodesCount = a.episodesCount,
-                                    type = a.type, slug = a.slug, titleEng = a.titleEng, dub = a.dub, cover = a.cover,
+                                animeNode = LatestEpisodeAnime(
+                                    id = a.id, title = a.title, imageUrl = a.imageUrl, episodesCount = a.episodesCount ?: 0,
+                                    type = a.type ?: "TV", slug = a.slug ?: "", titleEng = a.titleEng, dub = a.dub ?: 0, cover = a.cover,
                                     anilistId = a.anilistId, titleIt = a.titleIt
                                 )
                             )
@@ -1241,7 +1114,9 @@ class AnimeUnity(
         if (!text.startsWith("{") && !text.startsWith("[")) return emptyList()
         val root = runCatching { parseJson<JsonNode>(text) }.getOrNull() ?: return emptyList()
         val arr = findFirstArrayNode(root, "episodes", "data", "videos", "items") ?: return emptyList()
-        return arr.mapNotNull { parseEpisodeFromNode(it, animeId) }
+        return arr.mapNotNull { 
+            runCatching { parseJson<Episode>(it.toString()) }.getOrNull()
+        }
     }
 
     private suspend fun parseAnimePageData(animePage: Document, pageUrl: String): AnimePageData {
@@ -1251,19 +1126,15 @@ class AnimeUnity(
             val parsedAnime = parseAnimeFromNode(animeNode)
             if (parsedAnime != null) {
                 val propsEpisodesNode = findFirstArrayNode(props, "episodes", "videos") ?: findFirstArrayNode(animeNode, "episodes", "videos")
-                val propsEpisodes = propsEpisodesNode?.mapNotNull { parseEpisodeFromNode(it, parsedAnime.id) }.orEmpty()
+                val propsEpisodes = propsEpisodesNode?.mapNotNull { 
+                    runCatching { parseJson<Episode>(it.toString()) }.getOrNull()
+                }.orEmpty()
+                
                 val allEpisodes = propsEpisodes.ifEmpty { fetchEpisodesFromNewApi(parsedAnime.id) }
                 val relatedNode = findFirstArrayNode(props, "related", "relatedAnimes", "related_animes", "recommendations") ?: findFirstArrayNode(animeNode, "related", "relatedAnimes", "related_animes")
                 val relatedList = relatedNode?.mapNotNull(::parseAnimeFromNode).orEmpty()
                 return AnimePageData(anime = parsedAnime, relatedAnime = relatedList, episodes = allEpisodes)
             }
-        }
-
-        val videoPlayer = animePage.selectFirst("video-player")
-        if (videoPlayer != null && videoPlayer.attr("anime").isNotBlank()) {
-            val anime = parseJson<Anime>(videoPlayer.attr("anime"))
-            val initialEpisodes = runCatching { parseJson<List<Episode>>(videoPlayer.attr("episodes")) }.getOrDefault(emptyList())
-            return AnimePageData(anime = anime, relatedAnime = emptyList(), episodes = initialEpisodes)
         }
 
         val match = Regex("""/anime/(\d+)-([a-zA-Z0-9-]+)""").find(pageUrl)
@@ -1329,7 +1200,7 @@ class AnimeUnity(
             related.id in excludedIds || (shouldMergeVariants && normalizeJikanTitle(withoutDubSuffix(getAnimeTitle(related))) == currentNormalizedTitle)
         }
 
-        val relatedAnimes = groupAnimeCards(filteredCorrelated).sortedBy { it.anime.date.toIntOrNull() ?: Int.MAX_VALUE }.amap { entry ->
+        val relatedAnimes = groupAnimeCards(filteredCorrelated).sortedBy { it.anime.date?.toIntOrNull() ?: Int.MAX_VALUE }.amap { entry ->
             val anime = entry.anime
             val relatedTitle = getAnimeTitle(anime)
             val poster = getImage(anime.imageUrl, anime.anilistId)
@@ -1338,7 +1209,7 @@ class AnimeUnity(
                 url = "$mainUrl/anime/${anime.id}-${anime.slug}",
                 type = when {
                     anime.type.equals("TV", ignoreCase = true) -> TvType.Anime
-                    anime.type.equals("Movie", ignoreCase = true) || anime.type.equals("Film", ignoreCase = true) || anime.episodesCount == 1 -> TvType.AnimeMovie
+                    anime.type.equals("Movie", ignoreCase = true) || anime.type.equals("Film", ignoreCase = true) || anime.finalEpisodesCount == 1 -> TvType.AnimeMovie
                     else -> TvType.OVA
                 }
             ) {
@@ -1360,14 +1231,14 @@ class AnimeUnity(
             url = getAnimeUrl(primaryAnime),
             type = when {
                 primaryAnime.type.equals("TV", ignoreCase = true) -> TvType.Anime
-                primaryAnime.type.equals("Movie", ignoreCase = true) || primaryAnime.type.equals("Film", ignoreCase = true) || primaryAnime.episodesCount == 1 -> TvType.AnimeMovie
+                primaryAnime.type.equals("Movie", ignoreCase = true) || primaryAnime.type.equals("Film", ignoreCase = true) || primaryAnime.finalEpisodesCount == 1 -> TvType.AnimeMovie
                 else -> TvType.OVA
             }
         ) {
             this.posterUrl = getImage(primaryAnime.imageUrl, primaryAnime.anilistId)
             primaryAnime.cover?.let { this.backgroundPosterUrl = getBanner(it) }
-            this.year = primaryAnime.date.toIntOrNull()
-            addDuration(primaryAnime.episodesLength.toString() + " minuti")
+            this.year = primaryAnime.year ?: primaryAnime.date?.toIntOrNull()
+            addDuration(primaryAnime.finalLength.toString() + " minuti")
             when {
                 hasSub && hasDub -> { addEpisodes(DubStatus.Subbed, subEpisodes); addEpisodes(DubStatus.Dubbed, dubEpisodes) }
                 hasDub -> addEpisodes(DubStatus.Dubbed, dubEpisodes)
@@ -1376,16 +1247,16 @@ class AnimeUnity(
             addAniListId(primaryAnime.anilistId)
             addMalId(primaryAnime.malId)
             if (trailerUrl != null) addTrailer(trailerUrl)
-            this.showStatus = getShowStatus(primaryAnime.status)
+            this.showStatus = getShowStatus(primaryAnime.finalStatus)
             val audioTag = when {
                 hasSub && hasDub -> "\uD83C\uDDEE\uD83C\uDDF9  Italiano / \uD83C\uDDEF\uD83C\uDDF5  Giapponese"
                 hasDub -> "\uD83C\uDDEE\uD83C\uDDF9  Italiano"
                 else -> "\uD83C\uDDEF\uD83C\uDDF5  Giapponese"
             }
-            this.tags = listOfNotNull(audioTag, getStatusTag(primaryAnime.status)) + primaryAnime.genres.orEmpty().map { genre ->
+            this.tags = listOfNotNull(audioTag, getStatusTag(primaryAnime.finalStatus)) + primaryAnime.genres.orEmpty().map { genre ->
                 genre.name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             }
-            this.comingSoon = primaryAnime.status == "In uscita prossimamente"
+            this.comingSoon = primaryAnime.finalStatus == "upcoming"
             this.recommendations = relatedAnimes
         }
     }
@@ -1434,14 +1305,11 @@ class AnimeUnity(
         val resp = runCatching { app.get(episodePageUrl, headers = getPageHeaders()) }.getOrNull() ?: return null
         val doc = resp.document
 
-        val legacyEmbed = doc.select("video-player").attr("embed_url")
-        if (legacyEmbed.isNotBlank()) return legacyEmbed
-
         val props = extractInertiaProps(doc)
         if (props != null) {
             val directEmbed = props.asTextOrNull("embed_url", "embedUrl", "stream_url", "link")
-                ?: props.get("episode")?.asTextOrNull("embed_url", "embedUrl", "link", "url")
-                ?: props.get("video")?.asTextOrNull("embed_url", "embedUrl", "link", "url")
+                ?: props.get("episode")?.asTextOrNull("embed_url", "embedUrl", "link", "url", "video_url")
+                ?: props.get("video")?.asTextOrNull("embed_url", "embedUrl", "link", "url", "video_url")
             if (!directEmbed.isNullOrBlank()) return directEmbed
             
             val propsText = props.toString()
