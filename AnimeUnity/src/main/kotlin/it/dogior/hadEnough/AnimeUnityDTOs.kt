@@ -1,6 +1,11 @@
 package it.dogior.hadEnough
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.databind.DeserializationContext
+import com.fasterxml.jackson.databind.JsonDeserializer
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -20,6 +25,30 @@ sealed class BooleanOrString {
             is AsBoolean -> this.value
             is AsString -> this.value
         }
+    }
+}
+
+class TitleDeserializer : JsonDeserializer<String?>() {
+    override fun deserialize(p: JsonParser, ctxt: DeserializationContext): String? {
+        val node: JsonNode = p.codec.readTree(p)
+        if (node.isTextual) {
+            return node.asText()
+        }
+        if (node.isObject) {
+            val itNode = node.get("it")
+            if (itNode != null && itNode.isTextual && itNode.asText().isNotBlank()) {
+                return itNode.asText()
+            }
+            val enNode = node.get("en")
+            if (enNode != null && enNode.isTextual && enNode.asText().isNotBlank()) {
+                return enNode.asText()
+            }
+            val romajiNode = node.get("romaji")
+            if (romajiNode != null && romajiNode.isTextual && romajiNode.asText().isNotBlank()) {
+                return romajiNode.asText()
+            }
+        }
+        return null
     }
 }
 
@@ -78,30 +107,60 @@ data class RequestData(
 }
 
 data class ApiResponse(
-    @JsonProperty("records") val titles: List<Anime>? = emptyList(),
+    @JsonProperty("records") val records: List<Anime>? = null,
+    @JsonProperty("data") val data: List<Anime>? = null,
     @JsonProperty("tot") val total: Int = 0
-)
+) {
+    val titles: List<Anime>
+        get() = records ?: data ?: emptyList()
+}
 
 data class Anime(
     @JsonProperty("id") val id: Int,
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("title") val title: String? = null,
+    
     @JsonProperty("imageurl") val imageUrl: String? = null,
-    @JsonProperty("date") val date: String = "",
-    @JsonProperty("episodes_count") val episodesCount: Int = 0,
-    @JsonProperty("episodes_length") val episodesLength: Int = 0,
-    @JsonProperty("status") val status: String = "",
-    @JsonProperty("type") val type: String = "TV",
-    @JsonProperty("slug") val slug: String = "",
+    @JsonProperty("date") val date: String? = null,
+    @JsonProperty("year") val year: Int? = null,
+    @JsonProperty("episodes_count") val episodesCount: Int? = 0,
+    @JsonProperty("total_episodes") val totalEpisodes: Int? = 0,
+    @JsonProperty("episodes_length") val episodesLength: Int? = 0,
+    @JsonProperty("episode_runtime") val episodeRuntime: Int? = null,
+    @JsonProperty("status") val status: String? = "",
+    @JsonProperty("default_status") val defaultStatus: String? = null,
+    @JsonProperty("type") val type: String? = "TV",
+    @JsonProperty("slug") val slug: String? = "",
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("title_eng") val titleEng: String? = null,
+    
     @JsonProperty("day") val day: String? = null,
-    @JsonProperty("dub") val dub: Int = 0,
+    @JsonProperty("airing_day") val airingDay: String? = null,
+    @JsonProperty("dub") val dub: Int? = 0,
     @JsonProperty("cover") val cover: String? = null,
     @JsonProperty("anilist_id") val anilistId: Int? = null,
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("title_it") val titleIt: String? = null,
+    
     @JsonProperty("mal_id") val malId: Int? = null,
     @JsonProperty("episodes") val episodes: List<Episode>? = emptyList(),
     @JsonProperty("genres") val genres: List<Genre>? = emptyList()
-)
+) {
+    val finalEpisodesCount: Int
+        get() = (episodesCount?.takeIf { it > 0 } ?: totalEpisodes) ?: 0
+        
+    val finalDate: String
+        get() = date?.takeIf { it.isNotBlank() } ?: year?.toString() ?: ""
+        
+    val finalStatus: String
+        get() = status?.takeIf { it.isNotBlank() } ?: defaultStatus ?: ""
+        
+    val finalLength: Int
+        get() = (episodesLength?.takeIf { it > 0 } ?: episodeRuntime) ?: 24
+}
 
 data class Episode(
     @JsonProperty("id") val id: Int,
@@ -111,6 +170,7 @@ data class Episode(
     @JsonProperty("link") val link: String? = null,
     @JsonProperty("visite") val visite: Int = 0,
     @JsonProperty("hidden") val hidden: Int = 0,
+    @JsonProperty("is_hidden") val isHidden: Boolean? = false,
     @JsonProperty("public") val isPublic: Int = 0,
     @JsonProperty("scws_id") val scwsId: Int? = null,
     @JsonProperty("file_name") val fileName: String? = null
@@ -125,27 +185,39 @@ data class LatestEpisodeItem(
     @JsonProperty("id") val id: Int,
     @JsonProperty("anime_id") val animeId: Int = 0,
     @JsonProperty("user_id") val userId: Int? = null,
-    @JsonProperty("number") val number: String = "1",
-    @JsonProperty("anime") val anime: LatestEpisodeAnime
+    @JsonProperty("number") val number: String? = null,
+    @JsonProperty("episode") val episodeNode: Episode? = null,
+    @JsonProperty("anime") val animeNode: LatestEpisodeAnime? = null
 )
 
 data class LatestEpisodeAnime(
     @JsonProperty("id") val id: Int,
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("title") val title: String? = null,
+    
     @JsonProperty("imageurl") val imageUrl: String? = null,
     @JsonProperty("episodes_count") val episodesCount: Int = 0,
     @JsonProperty("type") val type: String = "TV",
     @JsonProperty("slug") val slug: String = "",
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("title_eng") val titleEng: String? = null,
+    
     @JsonProperty("dub") val dub: Int = 0,
     @JsonProperty("cover") val cover: String? = null,
     @JsonProperty("anilist_id") val anilistId: Int? = null,
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("title_it") val titleIt: String? = null
 )
 
 data class AnimeInfo(
     @JsonProperty("id") val id: Int = 0,
+    
+    @JsonDeserialize(using = TitleDeserializer::class)
     @JsonProperty("name") val name: String? = null,
+    
     @JsonProperty("episodes_count") val episodesCount: Int = 0,
     @JsonProperty("current_episode") val currentEpisode: Int = 0,
     @JsonProperty("episodes") val episodes: List<Episode> = emptyList()
