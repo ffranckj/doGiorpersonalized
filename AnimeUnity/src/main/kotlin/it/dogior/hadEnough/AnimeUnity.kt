@@ -1222,6 +1222,8 @@ class AnimeUnity(
         return Normalizer.normalize(dayName.orEmpty(), Normalizer.Form.NFD).replace("\\p{M}+".toRegex(), "").trim().lowercase(Locale.ROOT)
     }
 
+    // ==================== RICERCA ====================
+
     override suspend fun search(query: String): List<SearchResponse> {
         ensureHeadersAndCookies()
         val (searchAnimes, _) = fetchAnimesFromApiOrInertia("/api/search", "/archive", queryParams = mapOf("q" to query, "title" to query, "query" to query))
@@ -1420,6 +1422,10 @@ class AnimeUnity(
             return trailer?.url ?: trailer?.youtubeId?.let { "https://www.youtube.com/watch?v=$it" } ?: trailer?.embedUrl
         }
         return null
+    }
+
+    private fun normalizeJikanTitle(title: String): String {
+        return Normalizer.normalize(title, Normalizer.Form.NFD).replace("\\p{M}+".toRegex(), "").lowercase(Locale.ROOT).replace("[^a-z0-9]+".toRegex(), " ").trim()
     }
 
     // ==================== ESTRAZIONE LINK VIDEO ====================
