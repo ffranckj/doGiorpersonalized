@@ -44,6 +44,7 @@ class AnimeUnityPlugin : Plugin() {
         const val PREF_UNIFY_DUB_SUB_CARDS = "unifyDubSubCards"
         const val PREF_SHOW_DUB_SUB = "showDubSub"
         const val PREF_SHOW_EPISODE_NUMBER = "showEpisodeNumber"
+        const val PREF_SHOW_SCORE = "showScore"
         const val PREF_SECTION_ORDER = "sectionOrder"
         const val PREF_ENABLE_ADVANCED_SEARCH = "enableAdvancedSearch"
         const val PREF_ADVANCED_SEARCH_TITLE = "advancedSearchTitle"
@@ -71,57 +72,102 @@ class AnimeUnityPlugin : Plugin() {
         const val MAX_CACHE_MAX_SIZE_MB = 2048
         private const val ARCHIVE_OLDEST_YEAR = 1966
         private val defaultSectionKeys = DEFAULT_SECTION_ORDER.split(",")
-        private val validSectionKeys = listOf("latest", "calendar", "ongoing", "popular", "best", "upcoming", "random")
+        private val validSectionKeys = listOf(
+            "latest",
+            "calendar",
+            "ongoing",
+            "popular",
+            "best",
+            "upcoming",
+            "random"
+        )
 
         private val siteSchemeRegex = Regex("""(?i)^https?://""")
         private val validSiteHostRegex = Regex(
             pattern = """^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$""",
             option = RegexOption.IGNORE_CASE
         )
-        private val legacyHosts = setOf(
-            "animeunity.co", "www.animeunity.co",
-            "animeunity.so", "www.animeunity.so",
-            "animeunity.to", "www.animeunity.to",
-            "animeunity.tv", "www.animeunity.tv",
-            "animeunity.it", "www.animeunity.it"
-        )
-
         private val advancedSearchGenreOptions = listOf(
-            ArchiveGenreOption(51, "Action"), ArchiveGenreOption(21, "Adventure"),
-            ArchiveGenreOption(43, "Avant Garde"), ArchiveGenreOption(59, "Boys Love"),
-            ArchiveGenreOption(37, "Comedy"), ArchiveGenreOption(13, "Demons"),
-            ArchiveGenreOption(22, "Drama"), ArchiveGenreOption(5, "Ecchi"),
-            ArchiveGenreOption(9, "Fantasy"), ArchiveGenreOption(44, "Game"),
-            ArchiveGenreOption(58, "Girls Love"), ArchiveGenreOption(52, "Gore"),
-            ArchiveGenreOption(56, "Gourmet"), ArchiveGenreOption(15, "Harem"),
-            ArchiveGenreOption(4, "Hentai"), ArchiveGenreOption(30, "Historical"),
-            ArchiveGenreOption(3, "Horror"), ArchiveGenreOption(53, "Isekai"),
-            ArchiveGenreOption(45, "Josei"), ArchiveGenreOption(14, "Kids"),
-            ArchiveGenreOption(57, "Mahou Shoujo"), ArchiveGenreOption(31, "Martial Arts"),
-            ArchiveGenreOption(38, "Mecha"), ArchiveGenreOption(46, "Military"),
-            ArchiveGenreOption(16, "Music"), ArchiveGenreOption(24, "Mystery"),
-            ArchiveGenreOption(32, "Parody"), ArchiveGenreOption(39, "Police"),
-            ArchiveGenreOption(47, "Psychological"), ArchiveGenreOption(29, "Racing"),
-            ArchiveGenreOption(54, "Reincarnation"), ArchiveGenreOption(17, "Romance"),
-            ArchiveGenreOption(25, "Samurai"), ArchiveGenreOption(33, "School"),
-            ArchiveGenreOption(40, "Sci-fi"), ArchiveGenreOption(49, "Seinen"),
-            ArchiveGenreOption(18, "Shoujo"), ArchiveGenreOption(34, "Shounen"),
-            ArchiveGenreOption(50, "Slice of Life"), ArchiveGenreOption(19, "Space"),
-            ArchiveGenreOption(27, "Sports"), ArchiveGenreOption(35, "Super Power"),
-            ArchiveGenreOption(42, "Supernatural"), ArchiveGenreOption(55, "Survival"),
-            ArchiveGenreOption(48, "Thriller"), ArchiveGenreOption(20, "Vampire")
+            ArchiveGenreOption(51, "Action"),
+            ArchiveGenreOption(21, "Adventure"),
+            ArchiveGenreOption(43, "Avant Garde"),
+            ArchiveGenreOption(59, "Boys Love"),
+            ArchiveGenreOption(37, "Comedy"),
+            ArchiveGenreOption(13, "Demons"),
+            ArchiveGenreOption(22, "Drama"),
+            ArchiveGenreOption(5, "Ecchi"),
+            ArchiveGenreOption(9, "Fantasy"),
+            ArchiveGenreOption(44, "Game"),
+            ArchiveGenreOption(58, "Girls Love"),
+            ArchiveGenreOption(52, "Gore"),
+            ArchiveGenreOption(56, "Gourmet"),
+            ArchiveGenreOption(15, "Harem"),
+            ArchiveGenreOption(4, "Hentai"),
+            ArchiveGenreOption(30, "Historical"),
+            ArchiveGenreOption(3, "Horror"),
+            ArchiveGenreOption(53, "Isekai"),
+            ArchiveGenreOption(45, "Josei"),
+            ArchiveGenreOption(14, "Kids"),
+            ArchiveGenreOption(57, "Mahou Shoujo"),
+            ArchiveGenreOption(31, "Martial Arts"),
+            ArchiveGenreOption(38, "Mecha"),
+            ArchiveGenreOption(46, "Military"),
+            ArchiveGenreOption(16, "Music"),
+            ArchiveGenreOption(24, "Mystery"),
+            ArchiveGenreOption(32, "Parody"),
+            ArchiveGenreOption(39, "Police"),
+            ArchiveGenreOption(47, "Psychological"),
+            ArchiveGenreOption(29, "Racing"),
+            ArchiveGenreOption(54, "Reincarnation"),
+            ArchiveGenreOption(17, "Romance"),
+            ArchiveGenreOption(25, "Samurai"),
+            ArchiveGenreOption(33, "School"),
+            ArchiveGenreOption(40, "Sci-fi"),
+            ArchiveGenreOption(49, "Seinen"),
+            ArchiveGenreOption(18, "Shoujo"),
+            ArchiveGenreOption(34, "Shounen"),
+            ArchiveGenreOption(50, "Slice of Life"),
+            ArchiveGenreOption(19, "Space"),
+            ArchiveGenreOption(27, "Sports"),
+            ArchiveGenreOption(35, "Super Power"),
+            ArchiveGenreOption(42, "Supernatural"),
+            ArchiveGenreOption(55, "Survival"),
+            ArchiveGenreOption(48, "Thriller"),
+            ArchiveGenreOption(20, "Vampire"),
         )
-        private val advancedSearchOrderOptions = listOf("Lista A-Z", "Lista Z-A", "Popolarità", "Valutazione")
-        private val advancedSearchStatusOptions = listOf("In Corso", "Terminato", "In Uscita", "Droppato")
-        private val advancedSearchTypeOptions = listOf("TV", "TV Short", "OVA", "ONA", "Special", "Movie")
-        private val advancedSearchSeasonOptions = listOf("Inverno", "Primavera", "Estate", "Autunno")
+        private val advancedSearchOrderOptions = listOf(
+            "Lista A-Z",
+            "Lista Z-A",
+            "Popolarità",
+            "Valutazione",
+        )
+        private val advancedSearchStatusOptions = listOf(
+            "In Corso",
+            "Terminato",
+            "In Uscita",
+            "Droppato",
+        )
+        private val advancedSearchTypeOptions = listOf(
+            "TV",
+            "TV Short",
+            "OVA",
+            "ONA",
+            "Special",
+            "Movie",
+        )
+        private val advancedSearchSeasonOptions = listOf(
+            "Inverno",
+            "Primavera",
+            "Estate",
+            "Autunno",
+        )
 
         private fun normalizeSiteUrl(value: String?): String? {
             val rawValue = value?.trim().orEmpty()
             if (rawValue.isBlank()) return null
 
             val withoutScheme = rawValue.replaceFirst(siteSchemeRegex, "")
-            val normalizedHost = withoutScheme.trimEnd('/').lowercase(Locale.ROOT)
+            val normalizedHost = withoutScheme.trimEnd('/')
 
             if (normalizedHost.isBlank()) return null
             if (normalizedHost.contains("/") || normalizedHost.contains("?") || normalizedHost.contains("#")) {
@@ -130,21 +176,32 @@ class AnimeUnityPlugin : Plugin() {
             if (!validSiteHostRegex.matches(normalizedHost)) {
                 return null
             }
-            if (normalizedHost in legacyHosts) {
-                return DEFAULT_SITE_URL
+
+            val host = normalizedHost.lowercase(Locale.ROOT).let {
+                if (it == "www.animeunity.cx") "animeunity.cx" else it
             }
-            return "https://$normalizedHost/"
+            return "https://$host/"
         }
 
-        fun isValidSiteUrl(value: String?): Boolean = normalizeSiteUrl(value) != null
+        fun isValidSiteUrl(value: String?): Boolean {
+            return normalizeSiteUrl(value) != null
+        }
 
-        fun getValidatedSiteUrl(value: String?): String = normalizeSiteUrl(value) ?: DEFAULT_SITE_URL
+        fun getValidatedSiteUrl(value: String?): String {
+            return normalizeSiteUrl(value) ?: DEFAULT_SITE_URL
+        }
 
-        fun getConfiguredSiteUrl(sharedPref: SharedPreferences?): String =
-            getValidatedSiteUrl(sharedPref?.getString(PREF_SITE_URL, null))
+        fun getConfiguredSiteUrl(sharedPref: SharedPreferences?): String {
+            val configuredUrl = getValidatedSiteUrl(sharedPref?.getString(PREF_SITE_URL, null))
+            return when (configuredUrl) {
+                "https://animeunity.co/", "https://www.animeunity.co/" -> DEFAULT_SITE_URL
+                else -> configuredUrl
+            }
+        }
 
-        fun getConfiguredBaseUrl(sharedPref: SharedPreferences?): String =
-            getConfiguredSiteUrl(sharedPref).removeSuffix("/")
+        fun getConfiguredBaseUrl(sharedPref: SharedPreferences?): String {
+            return getConfiguredSiteUrl(sharedPref).removeSuffix("/")
+        }
 
         fun getValidatedSectionOrder(value: String?): String {
             val normalizedSections = value
@@ -157,39 +214,62 @@ class AnimeUnityPlugin : Plugin() {
             return if (normalizedSections.isEmpty()) {
                 DEFAULT_SECTION_ORDER
             } else {
-                (normalizedSections + defaultSectionKeys.filterNot { it in normalizedSections }).joinToString(",")
+                (normalizedSections + defaultSectionKeys.filterNot { it in normalizedSections })
+                    .joinToString(",")
             }
         }
 
-        fun getConfiguredSectionOrder(sharedPref: SharedPreferences?): String =
-            getValidatedSectionOrder(sharedPref?.getString(PREF_SECTION_ORDER, null))
+        fun getConfiguredSectionOrder(sharedPref: SharedPreferences?): String {
+            return getValidatedSectionOrder(sharedPref?.getString(PREF_SECTION_ORDER, null))
+        }
 
         fun getConfiguredSectionTitle(
             sharedPref: SharedPreferences?,
             prefKey: String,
             fallback: String,
         ): String {
-            return sharedPref?.getString(prefKey, null)?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
+            return sharedPref?.getString(prefKey, null)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: fallback
         }
 
         fun shouldUseUnifiedDubSubCards(sharedPref: SharedPreferences?): Boolean {
-            return sharedPref?.getBoolean(PREF_UNIFY_DUB_SUB_CARDS, DEFAULT_UNIFY_DUB_SUB_CARDS)
-                ?: DEFAULT_UNIFY_DUB_SUB_CARDS
+            return sharedPref?.getBoolean(
+                PREF_UNIFY_DUB_SUB_CARDS,
+                DEFAULT_UNIFY_DUB_SUB_CARDS,
+            ) ?: DEFAULT_UNIFY_DUB_SUB_CARDS
         }
 
-        fun getAdvancedSearchGenres(): List<ArchiveGenreOption> = advancedSearchGenreOptions
+        fun getAdvancedSearchGenres(): List<ArchiveGenreOption> {
+            return advancedSearchGenreOptions
+        }
 
         fun getAdvancedSearchYearOptions(): List<String> {
             val latestYear = Calendar.getInstance().get(Calendar.YEAR) + 1
             return (latestYear downTo ARCHIVE_OLDEST_YEAR).map(Int::toString)
         }
 
-        fun getAdvancedSearchOrderOptions(): List<String> = advancedSearchOrderOptions
-        fun getAdvancedSearchStatusOptions(): List<String> = advancedSearchStatusOptions
-        fun getAdvancedSearchTypeOptions(): List<String> = advancedSearchTypeOptions
-        fun getAdvancedSearchSeasonOptions(): List<String> = advancedSearchSeasonOptions
+        fun getAdvancedSearchOrderOptions(): List<String> {
+            return advancedSearchOrderOptions
+        }
 
-        private fun getValidatedAdvancedOption(value: String?, options: List<String>): String? {
+        fun getAdvancedSearchStatusOptions(): List<String> {
+            return advancedSearchStatusOptions
+        }
+
+        fun getAdvancedSearchTypeOptions(): List<String> {
+            return advancedSearchTypeOptions
+        }
+
+        fun getAdvancedSearchSeasonOptions(): List<String> {
+            return advancedSearchSeasonOptions
+        }
+
+        private fun getValidatedAdvancedOption(
+            value: String?,
+            options: List<String>,
+        ): String? {
             val normalizedValue = value?.trim().orEmpty()
             if (normalizedValue.isBlank()) return null
             return options.firstOrNull { it.equals(normalizedValue, ignoreCase = true) }
@@ -197,23 +277,41 @@ class AnimeUnityPlugin : Plugin() {
 
         fun getAdvancedSearchConfig(sharedPref: SharedPreferences?): AdvancedSearchConfig {
             val genreId = sharedPref?.getInt(PREF_ADVANCED_SEARCH_GENRE_ID, -1) ?: -1
+
             return AdvancedSearchConfig(
                 enabled = sharedPref?.getBoolean(PREF_ENABLE_ADVANCED_SEARCH, false) ?: false,
                 title = sharedPref?.getString(PREF_ADVANCED_SEARCH_TITLE, null)?.trim().orEmpty(),
                 genre = advancedSearchGenreOptions.firstOrNull { it.id == genreId },
-                year = getValidatedAdvancedOption(sharedPref?.getString(PREF_ADVANCED_SEARCH_YEAR, null), getAdvancedSearchYearOptions()),
-                order = getValidatedAdvancedOption(sharedPref?.getString(PREF_ADVANCED_SEARCH_ORDER, null), advancedSearchOrderOptions),
-                status = getValidatedAdvancedOption(sharedPref?.getString(PREF_ADVANCED_SEARCH_STATUS, null), advancedSearchStatusOptions),
-                type = getValidatedAdvancedOption(sharedPref?.getString(PREF_ADVANCED_SEARCH_TYPE, null), advancedSearchTypeOptions),
-                season = getValidatedAdvancedOption(sharedPref?.getString(PREF_ADVANCED_SEARCH_SEASON, null), advancedSearchSeasonOptions),
+                year = getValidatedAdvancedOption(
+                    sharedPref?.getString(PREF_ADVANCED_SEARCH_YEAR, null),
+                    getAdvancedSearchYearOptions(),
+                ),
+                order = getValidatedAdvancedOption(
+                    sharedPref?.getString(PREF_ADVANCED_SEARCH_ORDER, null),
+                    advancedSearchOrderOptions,
+                ),
+                status = getValidatedAdvancedOption(
+                    sharedPref?.getString(PREF_ADVANCED_SEARCH_STATUS, null),
+                    advancedSearchStatusOptions,
+                ),
+                type = getValidatedAdvancedOption(
+                    sharedPref?.getString(PREF_ADVANCED_SEARCH_TYPE, null),
+                    advancedSearchTypeOptions,
+                ),
+                season = getValidatedAdvancedOption(
+                    sharedPref?.getString(PREF_ADVANCED_SEARCH_SEASON, null),
+                    advancedSearchSeasonOptions,
+                ),
             )
         }
 
-        fun isAdvancedSearchEnabled(sharedPref: SharedPreferences?): Boolean =
-            getAdvancedSearchConfig(sharedPref).enabled
+        fun isAdvancedSearchEnabled(sharedPref: SharedPreferences?): Boolean {
+            return getAdvancedSearchConfig(sharedPref).enabled
+        }
 
         fun getAdvancedSearchRequestData(sharedPref: SharedPreferences?): RequestData {
             val config = getAdvancedSearchConfig(sharedPref)
+
             return RequestData(
                 title = config.title,
                 type = config.type?.let(BooleanOrString::AsString) ?: BooleanOrString.AsBoolean(false),
@@ -227,17 +325,20 @@ class AnimeUnityPlugin : Plugin() {
         }
 
         fun getCacheMaxEntries(sharedPref: SharedPreferences?): Int {
-            return (sharedPref?.getInt(PREF_CACHE_MAX_ENTRIES, DEFAULT_CACHE_MAX_ENTRIES) ?: DEFAULT_CACHE_MAX_ENTRIES)
+            return (sharedPref?.getInt(PREF_CACHE_MAX_ENTRIES, DEFAULT_CACHE_MAX_ENTRIES)
+                ?: DEFAULT_CACHE_MAX_ENTRIES)
                 .coerceIn(MIN_CACHE_MAX_ENTRIES, MAX_CACHE_MAX_ENTRIES)
         }
 
         fun getCacheMaxSizeMb(sharedPref: SharedPreferences?): Int {
-            return (sharedPref?.getInt(PREF_CACHE_MAX_SIZE_MB, DEFAULT_CACHE_MAX_SIZE_MB) ?: DEFAULT_CACHE_MAX_SIZE_MB)
+            return (sharedPref?.getInt(PREF_CACHE_MAX_SIZE_MB, DEFAULT_CACHE_MAX_SIZE_MB)
+                ?: DEFAULT_CACHE_MAX_SIZE_MB)
                 .coerceIn(MIN_CACHE_MAX_SIZE_MB, MAX_CACHE_MAX_SIZE_MB)
         }
 
-        fun getCacheMaxBytes(sharedPref: SharedPreferences?): Long =
-            getCacheMaxSizeMb(sharedPref) * 1024L * 1024L
+        fun getCacheMaxBytes(sharedPref: SharedPreferences?): Long {
+            return getCacheMaxSizeMb(sharedPref) * 1024L * 1024L
+        }
 
         internal var activePlugin: AnimeUnityPlugin? = null
         internal var activeSharedPref: SharedPreferences? = null
@@ -249,6 +350,7 @@ class AnimeUnityPlugin : Plugin() {
         sharedPref = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         activePlugin = this
         activeSharedPref = sharedPref
+
         registerMainAPI(AnimeUnity(sharedPref))
     }
 }
